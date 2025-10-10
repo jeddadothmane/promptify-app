@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spotify Tools</title>
+  <style>
+    :root{
+      --green:#1ed760; --bg:#0f0f10; --panel:#141416; --muted:#9aa0a6; --text:#e6e6e6; --border:#2a2b2e;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:linear-gradient(180deg,#0b0b0c 0%, var(--bg) 100%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Arial}
+    .wrap{max-width:1100px;margin:32px auto;padding:0 16px}
+    header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+    h1{font-size:22px;margin:0}
+    .badge{border:1px solid rgba(30,215,96,.5);background:rgba(30,215,96,.08);color:#dfffe9;border-radius:999px;padding:4px 10px;font-size:12px}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.35)}
+    .controls{display:flex;flex-wrap:wrap;gap:10px;padding:12px;border-bottom:1px solid var(--border)}
+    input[type="text"]{background:#0d0d0f;border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:10px;outline:none;min-width:220px}
+    .btn{background:transparent;border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:10px;cursor:pointer}
+    .btn:hover{border-color:var(--green);box-shadow:0 0 0 2px rgba(30,215,96,.15)}
+    .table-wrap{overflow:auto}
+    table{width:100%;border-collapse:separate;border-spacing:0}
+    thead th{position:sticky;top:0;background:linear-gradient(180deg,#16171a,#141416);border-bottom:1px solid var(--border);text-align:left;padding:12px;font-size:13px;color:#c9c9c9;white-space:nowrap}
+    thead th button{background:none;border:none;color:inherit;font:inherit;cursor:pointer;display:flex;align-items:center;gap:6px}
+    tbody td{border-bottom:1px solid var(--border);padding:12px;vertical-align:top}
+    tbody tr:hover{background:#111214}
+    .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid var(--border);color:#cfd3d6}
+    .pill.green{border-color:rgba(30,215,96,.5);background:rgba(30,215,96,.08);color:#dfffe9}
+    .json-pre{white-space:pre-wrap;word-break:break-word;background:#0d0e10;border:1px solid var(--border);padding:10px;border-radius:10px}
+    .footer{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:12px;padding:12px}
+    dialog{border:none;border-radius:16px;padding:0;background:var(--panel);color:var(--text);box-shadow:0 10px 40px rgba(0,0,0,.5);max-width:720px;width:92%}
+    dialog::backdrop{background:rgba(0,0,0,.6)}
+    .modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 12px;border-bottom:1px solid var(--border)}
+    .modal-body{padding:16px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Spotify Tools</h1>
+    </header>
+
+    <section class="card">
+      <div class="controls">
+        <input id="search" type="text" placeholder="Rechercher… (nom, description, …)" />
+        <button class="btn" id="resetBtn">Réinitialiser</button>
+        <span id="meta" style="margin-left:auto;color:#9aa0a6;font-size:12px">—</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr id="thead"></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="footer">
+        <div>Astuce : cliquez sur l’entête pour trier • cliquez sur « Détails » pour voir l’objet complet.</div>
+        <div id="count"></div>
+      </div>
+    </section>
+
+    <dialog id="detailModal">
+      <div class="modal-head">
+        <strong id="modalTitle">Détails</strong>
+        <button class="btn" id="closeModal">Fermer</button>
+      </div>
+      <div class="modal-body"><div id="modalContent"></div></div>
+    </dialog>
+  </div>
+
+  <!-- Injection côté serveur via Jinja2 (FastAPI Templates). Ne rien modifier ici côté Python. -->
+  <script>
+    // Le serveur doit définir window.INIT_DATA = [...] avant l’exécution de ce script (voir FastAPI plus bas).
+    // Fallback si non défini
+    window.INIT_DATA = {{ tools | tojson | safe }};
+  </script>
+
+  <script>
+    const byId = id => document.getElementById(id);
+    const theadEl = byId('thead');
+    const tbodyEl = byId('tbody');
+    const countEl = byId('count');
+    const metaEl = byId('meta');
+
+    const state = { data: [], filtered: [], columns: [], sort: { key:null, dir:1 } };
+
+    function inferColumns(items){
+      const cols = new Set();
+      items.forEach(obj => Object.keys(obj||{}).forEach(k => {
+        if(typeof obj[k] !== 'object' || Array.isArray(obj[k])) cols.add(k);
+        if(k === 'parameters') cols.add('parameters');
+      }));
+      const prio=['name','description','parameters'];
+      return Array.from(cols).sort((a,b)=>{
+        const ia=prio.indexOf(a), ib=prio.indexOf(b);
+        if(ia!==-1 && ib!==-1) return ia-ib; if(ia!==-1) return -1; if(ib!==-1) return 1; return a.localeCompare(b);
+      });
+    }
+
+    function formatCell(value, key){
+      if(key==='parameters' && value && typeof value==='object'){
+        const names = Object.keys(value);
+        if(!names.length) return '<span class="pill">0 paramètre</span>';
+        return `<span class="pill green">${names.length} paramètre(s)</span>`;
+      }
+      if(typeof value==='object' && value!==null){ return `<code class="pill">${Array.isArray(value)?'Array':'Object'}</code>`; }
+      if(value===null || value===undefined || value==='') return '<span style="color:#9aa0a6">—</span>';
+      return String(value);
+    }
+
+    function renderHeader(){
+      theadEl.innerHTML='';
+      const tr=document.createElement('tr');
+      state.columns.forEach(col=>{
+        const th=document.createElement('th');
+        const btn=document.createElement('button');
+        btn.innerHTML=`${col} <span aria-hidden>⇅</span>`;
+        btn.addEventListener('click',()=> sortBy(col));
+        th.appendChild(btn); tr.appendChild(th);
+      });
+      const th=document.createElement('th'); th.textContent='Détails'; tr.appendChild(th);
+      theadEl.appendChild(tr);
+    }
+
+    function renderBody(){
+      tbodyEl.innerHTML='';
+      state.filtered.forEach((row)=>{
+        const tr=document.createElement('tr');
+        state.columns.forEach(col=>{
+          const td=document.createElement('td');
+          td.innerHTML = formatCell(row[col], col);
+          tr.appendChild(td);
+        });
+        const action=document.createElement('td');
+        const btn=document.createElement('button'); btn.className='btn'; btn.textContent='Voir';
+        btn.addEventListener('click',()=> openDetails(row));
+        action.appendChild(btn); tr.appendChild(action);
+        tbodyEl.appendChild(tr);
+      });
+      countEl.textContent = `${state.filtered.length} élément(s)`;
+    }
+
+    function sortBy(key){
+      const dir = (state.sort.key===key)? -state.sort.dir : 1;
+      state.sort={key,dir};
+      state.filtered.sort((a,b)=>{
+        const va=a?.[key], vb=b?.[key];
+        if(typeof va==='number' && typeof vb==='number') return (va-vb)*dir;
+        return String(va).localeCompare(String(vb))*dir;
+      });
+      renderBody();
+    }
+
+    function filter(term){
+      if(!term){ state.filtered=[...state.data]; return; }
+      const q=term.toLowerCase();
+      state.filtered = state.data.filter(obj=>{
+        return state.columns.some(k=> String(obj[k]??'').toLowerCase().includes(q)) ||
+               JSON.stringify(obj).toLowerCase().includes(q);
+      });
+    }
+
+    function openDetails(row){
+      const dlg=byId('detailModal');
+      byId('modalTitle').textContent = row.name || 'Détails';
+      const content = byId('modalContent');
+      let html='';
+      if(row.parameters && typeof row.parameters==='object'){
+        html+='<h3 style="margin:0 0 8px">Paramètres</h3>';
+        html+='<div style="display:grid;grid-template-columns:1fr 120px 120px;gap:8px;margin-bottom:12px">';
+        html+='<div style="color:#9aa0a6">Nom</div><div style="color:#9aa0a6">Type</div><div style="color:#9aa0a6">Par défaut</div>';
+        for(const [pname,pdesc] of Object.entries(row.parameters)){
+          const t=(pdesc&&typeof pdesc==='object')?(pdesc.type??'—'):'—';
+          const d=(pdesc&&typeof pdesc==='object'&&'default' in pdesc)?pdesc.default:'—';
+          html+=`<div class="pill">${pname}</div><div>${t}</div><div>${d}</div>`;
+          if(pdesc && typeof pdesc==='object' && pdesc.description){
+            html+=`<div style="grid-column:1/-1;color:#9aa0a6;margin:-2px 0 6px">${pdesc.description}</div>`;
+          }
+        }
+        html+='</div>';
+      }
+      html+='<h3 style="margin:8px 0">Objet complet</h3>';
+      html+=`<pre class="json-pre">${escapeHtml(JSON.stringify(row,null,2))}</pre>`
+      content.innerHTML=html;
+      dlg.showModal();
+    }
+
+    function escapeHtml(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+
+    function init(data, source){
+      state.data = Array.isArray(data)? data : [];
+      state.columns = inferColumns(state.data);
+      filter(''); renderHeader(); renderBody();
+      metaEl.textContent = `Source: ${source}`;
+      byId('search').addEventListener('input', e=>{ filter(e.target.value); renderBody(); });
+      byId('resetBtn').addEventListener('click', ()=>{ byId('search').value=''; filter(''); renderBody(); });
+      byId('closeModal').addEventListener('click', ()=> byId('detailModal').close());
+    }
+
+    // Boot : remplit depuis window.INIT_DATA (injection serveur)
+    init(window.INIT_DATA, 'injection côté serveur');
+  </script>
+</body>
+</html>

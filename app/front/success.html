@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spotify Authentication Success</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+        .success { background-color: #1db954; color: white; padding: 20px; border-radius: 10px; }
+        .token { background-color: #f5f5f5; padding: 15px; border-radius: 5px; word-break: break-all; }
+        .copy-btn { background-color: #1db954; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+        .copy-btn:hover { background-color: #1ed760; }
+    </style>
+</head>
+<body>
+    <div class="success">
+        <h2>🎵 Spotify Authentication Successful!</h2>
+        <p>You have successfully authenticated with Spotify. Here's your access token:</p>
+    </div>
+    
+    <div class="token">
+        <strong>Access Token:</strong><br>
+        <code id="token">{{ACCESS_TOKEN}}</code>
+        <br><br>
+        <button class="copy-btn" onclick="copyToken()">Copy Token</button>
+    </div>
+    
+    <div style="margin-top: 20px;">
+        <h3>How to use this token:</h3>
+        <p>Use this access token in your API requests to the <code>/ask</code> endpoint:</p>
+        <pre style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
+{
+    "prompt": "What are my top 5 artists?",
+    "spotify_access_token": "{{ACCESS_TOKEN}}"
+}</pre>
+    </div>
+    
+    <div style="margin-top: 20px;">
+        <p><strong>Token expires in:</strong> {{EXPIRES_IN}} seconds</p>
+        <p><strong>Refresh token:</strong> {{REFRESH_TOKEN}}</p>
+    </div>
+    
+<!-- JSON payload injected by your backend template engine -->
+    <script id="oauth-data" type="application/json">
+    {
+    "access_token": "{{ACCESS_TOKEN}}",
+    "expires_in": {{EXPIRES_IN}},
+    "refresh_token": "{{REFRESH_TOKEN}}"
+    }
+    </script>
+
+    <script>
+    function copyToken() {
+        const token = document.getElementById('token').textContent;
+        navigator.clipboard.writeText(token).then(function() {
+            alert('Token copied to clipboard!');
+        });
+    }
+
+    function hasLocalStorage() {
+        try {
+        const k = "__ls_test__";
+        localStorage.setItem(k, "1");
+        localStorage.removeItem(k);
+        return true;
+        } catch (_) {
+        return false;
+        }
+    }
+
+    function isTemplatedLiteral(v) {
+        // If template didn’t replace placeholders, you'll still see {{ACCESS_TOKEN}} etc.
+        return typeof v === "string" && /\{\{.*\}\}/.test(v);
+    }
+
+    function storeTokens({ access_token, expires_in, refresh_token }) {
+        if (!hasLocalStorage()) {
+        console.warn("localStorage is not available; tokens cannot be persisted.");
+        return false;
+        }
+        if (!access_token || isTemplatedLiteral(access_token)) {
+        console.warn("Access token missing or not injected by template.");
+        return false;
+        }
+        const seconds = Number(expires_in);
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+        console.warn("Invalid expires_in:", expires_in);
+        return false;
+        }
+
+        const expiryDate = new Date();
+        expiryDate.setSeconds(expiryDate.getSeconds() + seconds);
+
+        localStorage.setItem("spotify_token", access_token);
+        localStorage.setItem("spotify_token_expiry", expiryDate.toISOString());
+        if (refresh_token && !isTemplatedLiteral(refresh_token)) {
+        localStorage.setItem("spotify_refresh_token", refresh_token);
+        }
+
+        console.log("✅ Stored spotify_token, spotify_token_expiry, spotify_refresh_token (if provided).");
+        return true;
+    }
+
+    function notifyOpener(tokens) {
+        try {
+        // If the OAuth flow opened a popup window, send tokens back
+        if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({ type: "SPOTIFY_AUTH_SUCCESS", payload: tokens }, "*");
+        }
+        } catch (e) {
+        console.warn("Unable to postMessage to opener:", e);
+        }
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+        const el = document.getElementById("oauth-data");
+        let data = null;
+        try {
+        data = JSON.parse(el.textContent || "{}");
+        } catch (e) {
+        console.error("Failed to parse oauth data JSON:", e);
+        }
+
+        if (!data) return;
+
+        const ok = storeTokens({
+        access_token: data.access_token,
+        expires_in: data.expires_in,
+        refresh_token: data.refresh_token
+        });
+
+        if (ok) {
+        notifyOpener(data);
+
+        // Redirect (change target if needed)
+        setTimeout(() => {
+            // If opened as popup, try to close it:
+            if (window.opener && !window.opener.closed) {
+            window.close();
+            } else {
+            window.location.href = "/";
+            // e.g. window.location.href = "/spotify/tools";
+            }
+        }, 1200);
+        }
+    });
+    </script>
+</body>
+</html>
