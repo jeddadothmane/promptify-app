@@ -2,122 +2,29 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
-import os
-import json
+from .schemas import AskRequest, AskResponse
 from dotenv import load_dotenv
-from .spotify_mcp import SpotifyMCPTools
-from .open_ai_client import OpenAIClient
-
+from app.clients.spotify_mcp import SpotifyMCPTools
+from app.clients.open_ai_client import OpenAIClient
+from .utils import load_html_template, execute_spotify_tool
 # Load environment variables from .env file
 # This will look for .env in the current directory and parent directories
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
-TEMPLATES_DIR = BASE_DIR / "front"  
+TEMPLATES_DIR = BASE_DIR / "view"
 
 app = FastAPI(
-    title="Prompt Relay API",
-    description="POST a prompt, get an OpenAI response.",
+    title="Promptify App",
+    description="Promptify App",
     version="1.0.0",
 )
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-# ---- Schemas ----
-class AskRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, description="User prompt to send to OpenAI")
-    system: Optional[str] = Field(
-        default="You are a concise and helpful assistant with access to Spotify tools. You can help users with their music preferences, top artists, tracks, and playlists.",
-        description="Optional system instruction."
-    )
-    model: Optional[str] = Field(
-        default="gpt-4o-mini",
-        description="OpenAI model to use."
-    )
-    temperature: Optional[float] = Field(default=0.7, ge=0.0, le=2.0)
-    spotify_access_token: Optional[str] = Field(
-        default=None,
-        description="Spotify access token for authenticated requests"
-    )
-
-class AskResponse(BaseModel):
-    answer: str
-
 # ---- Initialize clients ----
 openai_client = OpenAIClient()
 spotify_tools = SpotifyMCPTools()
-
-# ---- Helper functions ----
-def load_html_template(template_path: str, fallback_path: str = None, replacements: dict = None) -> str:
-    """Load HTML template with fallback and replacements"""
-    try:
-        with open(template_path, "r", encoding="utf-8") as file:
-            content = file.read()
-    except FileNotFoundError:
-        if fallback_path:
-            try:
-                with open(fallback_path, "r", encoding="utf-8") as file:
-                    content = file.read()
-            except FileNotFoundError:
-                content = "<h1>Template not found</h1>"
-        else:
-            content = "<h1>Template not found</h1>"
-    
-    # Apply replacements if provided
-    if replacements:
-        for key, value in replacements.items():
-            content = content.replace(f"{{{{{key}}}}}", str(value))
-    
-    return content
-
-# Spotify intent detection is now handled by openai_client.detect_spotify_intent()
-
-async def execute_spotify_tool(tool_name: str, parameters: Dict[str, Any], access_token: str) -> Dict[str, Any]:
-    """Execute Spotify MCP tool"""
-    if not spotify_tools.authenticate(access_token):
-        return {"error": "Failed to authenticate with Spotify"}
-    
-    try:
-        if tool_name == "get_top_artists":
-            return await spotify_tools.get_top_artists(
-                limit=parameters.get("limit", 5),
-                time_range=parameters.get("time_range", "medium_term")
-            )
-        elif tool_name == "get_top_tracks":
-            return await spotify_tools.get_top_tracks(
-                limit=parameters.get("limit", 5),
-                time_range=parameters.get("time_range", "medium_term")
-            )
-        elif tool_name == "get_recently_played":
-            return await spotify_tools.get_recently_played(
-                limit=parameters.get("limit", 20)
-            )
-        elif tool_name == "get_current_playback":
-            return await spotify_tools.get_current_playback()
-        elif tool_name == "search_tracks":
-            return await spotify_tools.search_tracks(
-                query=parameters.get("query", ""),
-                limit=parameters.get("limit", 10)
-            )
-        elif tool_name == "get_user_playlists":
-            return await spotify_tools.get_user_playlists(
-                limit=parameters.get("limit", 20)
-            )
-        elif tool_name == "create_playlist_from_prompt":
-            return await spotify_tools.create_playlist_from_prompt(
-                prompt=parameters.get("prompt", ""),
-                playlist_name=parameters.get("playlist_name", None),
-                description=parameters.get("description", None),
-                public=parameters.get("public", True)
-            )
-        else:
-            return {"error": f"Unknown tool: {tool_name}"}
-    except Exception as e:
-        return {"error": f"Tool execution failed: {str(e)}"}
-
-# Tool detection functions are now handled by openai_client.determine_spotify_tool_with_llm()
 
 # ---- Endpoint ----
 @app.post("/ask", response_model=AskResponse)
@@ -190,8 +97,8 @@ async def spotify_callback(code: str):
         
         # Load success HTML template
         html_content = load_html_template(
-            "app/front/success.html",
-            "app/front/fallback_success.html",
+            "app/view/success.html",
+            "app/view/fallback_success.html",
             {
                 "ACCESS_TOKEN": token_info["access_token"],
                 "EXPIRES_IN": token_info["expires_in"],
@@ -205,8 +112,8 @@ async def spotify_callback(code: str):
     except Exception as e:
         # Load error HTML template
         error_html = load_html_template(
-            "app/front/error.html",
-            "app/front/fallback_error.html",
+            "app/view/error.html",
+            "app/view/fallback_error.html",
             {"ERROR_MESSAGE": str(e)}
         )
         
@@ -217,8 +124,8 @@ async def spotify_callback(code: str):
 async def home():
     """Main UI page"""
     html_content = load_html_template(
-        "app/front/index.html",
-        "app/front/fallback_ui.html"
+        "app/view/index.html",
+        "app/view/fallback_ui.html"
     )
     
     from fastapi.responses import HTMLResponse
@@ -228,8 +135,8 @@ async def home():
 async def docs_page():
     """Documentation page with instructions"""
     html_content = load_html_template(
-        "app/front/login_success.html",
-        "app/front/fallback_ui.html"
+        "app/view/login_success.html",
+        "app/view/fallback_ui.html"
     )
     
     from fastapi.responses import HTMLResponse
