@@ -1,0 +1,55 @@
+[
+    {
+        "name": "get_top_artists",
+        "description": "Get user's top artists",
+        "parameters": {
+            "limit": {"type": "integer", "default": 5, "description": "Number of artists to return"},
+            "time_range": {"type": "string", "default": "medium_term", "description": "Time range: short_term, medium_term, long_term"}
+        }
+    },
+    {
+        "name": "get_top_tracks",
+        "description": "Get user's top tracks",
+        "parameters": {
+            "limit": {"type": "integer", "default": 5, "description": "Number of tracks to return"},
+            "time_range": {"type": "string", "default": "medium_term", "description": "Time range: short_term, medium_term, long_term"}
+        }
+    },
+    {
+        "name": "get_recently_played",
+        "description": "Get user's recently played tracks",
+        "parameters": {
+            "limit": {"type": "integer", "default": 20, "description": "Number of tracks to return"}
+        }
+    },
+    {
+        "name": "get_current_playback",
+        "description": "Get current playback state",
+        "parameters": {}
+    },
+    {
+        "name": "search_tracks",
+        "description": "Search for tracks",
+        "parameters": {
+            "query": {"type": "string", "description": "Search query"},
+            "limit": {"type": "integer", "default": 10, "description": "Number of results to return"}
+        }
+    },
+    {
+        "name": "get_user_playlists",
+        "description": "Get user's playlists",
+        "parameters": {
+            "limit": {"type": "integer", "default": 20, "description": "Number of playlists to return"}
+        }
+    },
+    {
+        "name": "create_playlist_from_prompt",
+        "description": "Create a playlist based on user prompt with AI-selected tracks",
+        "parameters": {
+            "prompt": {"type": "string", "description": "User prompt describing the playlist to create"},
+            "playlist_name": {"type": "string", "default": null, "description": "Custom name for the playlist"},
+            "description": {"type": "string", "default": null, "description": "Custom description for the playlist"},
+            "public": {"type": "boolean", "default": null, "description": "Whether the playlist should be public"}
+        }
+    }
+]

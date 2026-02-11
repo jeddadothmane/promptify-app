@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 from spotipy import Spotify
 from spotipy.oauth2 import SpotifyOAuth
@@ -14,7 +15,8 @@ class SpotifyMCPTools:
         self.client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
         self.redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8000/callback")
         self.scope = "user-top-read user-read-recently-played user-read-playback-state user-modify-playback-state playlist-read-private playlist-modify-public playlist-modify-private"
-        
+        self.data_file = Path(__file__).resolve().parent / "resources" / "spotify_tools.json"
+
         self.sp_oauth = SpotifyOAuth(
             client_id=self.client_id,
             client_secret=self.client_secret,
@@ -179,7 +181,7 @@ class SpotifyMCPTools:
             
             # Generate playlist name if not provided
             if not playlist_name:
-                playlist_name = f"AI Generated Playlist - {prompt[:50]}..."
+                playlist_name = f"Promptify Playlist"
             
             # Generate description if not provided
             if not description:
@@ -296,58 +298,15 @@ class SpotifyMCPTools:
     
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """Get list of available Spotify tools"""
-        return [
-            {
-                "name": "get_top_artists",
-                "description": "Get user's top artists",
-                "parameters": {
-                    "limit": {"type": "integer", "default": 5, "description": "Number of artists to return"},
-                    "time_range": {"type": "string", "default": "medium_term", "description": "Time range: short_term, medium_term, long_term"}
-                }
-            },
-            {
-                "name": "get_top_tracks",
-                "description": "Get user's top tracks",
-                "parameters": {
-                    "limit": {"type": "integer", "default": 5, "description": "Number of tracks to return"},
-                    "time_range": {"type": "string", "default": "medium_term", "description": "Time range: short_term, medium_term, long_term"}
-                }
-            },
-            {
-                "name": "get_recently_played",
-                "description": "Get user's recently played tracks",
-                "parameters": {
-                    "limit": {"type": "integer", "default": 20, "description": "Number of tracks to return"}
-                }
-            },
-            {
-                "name": "get_current_playback",
-                "description": "Get current playback state",
-                "parameters": {}
-            },
-            {
-                "name": "search_tracks",
-                "description": "Search for tracks",
-                "parameters": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "limit": {"type": "integer", "default": 10, "description": "Number of results to return"}
-                }
-            },
-            {
-                "name": "get_user_playlists",
-                "description": "Get user's playlists",
-                "parameters": {
-                    "limit": {"type": "integer", "default": 20, "description": "Number of playlists to return"}
-                }
-            },
-            {
-                "name": "create_playlist_from_prompt",
-                "description": "Create a playlist based on user prompt with AI-selected tracks",
-                "parameters": {
-                    "prompt": {"type": "string", "description": "User prompt describing the playlist to create"},
-                    "playlist_name": {"type": "string", "default": None, "description": "Custom name for the playlist"},
-                    "description": {"type": "string", "default": None, "description": "Custom description for the playlist"},
-                    "public": {"type": "boolean", "default": True, "description": "Whether the playlist should be public"}
-                }
-            }
-        ]
+        try:
+            with open(self.data_file, "r", encoding="utf-8") as f:
+                tools = json.load(f)
+                if not isinstance(tools, list):
+                    raise ValueError("spotify_tools.json must contain a list of tools")
+                return tools
+        except FileNotFoundError:
+            print(f"[WARN] JSON file not found: {self.data_file}")
+            return []
+        except json.JSONDecodeError as e:
+            print(f"[ERROR] Invalid JSON in {self.data_file}: {e}")
+            return []

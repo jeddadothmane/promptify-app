@@ -78,6 +78,16 @@ class OpenAIClient:
             
             response_text = completion.choices[0].message.content.strip()
             
+            # Remove markdown code blocks if present
+            if response_text.startswith("```"):
+                # Remove opening ```json or ``` and closing ```
+                lines = response_text.split('\n')
+                if lines[0].startswith("```"):
+                    lines = lines[1:]  # Remove first line
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]  # Remove last line
+                response_text = '\n'.join(lines).strip()
+            
             # Parse the JSON response
             try:
                 result = json.loads(response_text)
@@ -159,6 +169,8 @@ class OpenAIClient:
         {json.dumps(spotify_data, indent=2)}
         
         Please provide a helpful response based on this data, formatting it nicely for the user.
+        Please provide a valid format knowing that your response will directly integrated into a HTML file, so please keep in mind that you response is clear to an HTML return like a simple str but in HTML please.
+        Please do not return a response containing ```html```
         """
         
         return self.generate_response(enhanced_prompt, system_message, model, temperature)
@@ -198,6 +210,16 @@ class OpenAIClient:
             )
             
             response_text = completion.choices[0].message.content.strip()
+            
+            # Remove markdown code blocks if present
+            if response_text.startswith("```"):
+                # Remove opening ```json or ``` and closing ```
+                lines = response_text.split('\n')
+                if lines[0].startswith("```"):
+                    lines = lines[1:]  # Remove first line
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]  # Remove last line
+                response_text = '\n'.join(lines).strip()
             
             # Parse the JSON response
             try:
@@ -287,3 +309,77 @@ class OpenAIClient:
                 queries.append(term)
         
         return queries[:5] if queries else [prompt[:50]]
+
+    def generate_individual_track_searches(self, prompt: str, track_count: int) -> List[str]:
+        """Generate individual search queries for each track in the playlist using LLM"""
+        try:
+            search_prompt = f"""
+            You are a music curator expert. Given a user's playlist request, generate {track_count} specific search queries - one for each track that should be in the playlist.
+
+            User request: "{prompt}"
+            Number of tracks needed: {track_count}
+
+            Guidelines:
+            1. Create {track_count} diverse, specific search queries
+            2. Each query should target a different aspect/style within the requested genre/mood
+            3. Include variety in artists, sub-genres, moods, and styles
+            4. Make each query specific enough to find 1-3 good tracks
+            5. Avoid duplicate queries
+            6. Use terms that Spotify's search will understand well
+
+            Examples for "Make me a workout playlist with 5 tracks":
+            ["high energy workout", "motivational gym music", "intense cardio tracks", "power workout songs", "energetic fitness music"]
+
+            Examples for "Melodic death metal playlist with 3 tracks":
+            ["melodic death metal classics", "modern melodic death", "melodic blackened death"]
+
+            Examples for "Chill study music with 4 tracks":
+            ["ambient study music", "lo-fi hip hop", "acoustic instrumental", "soft electronic"]
+
+            Respond with ONLY a JSON array of exactly {track_count} search queries:
+            ["query1", "query2", "query3", ...]
+            """
+            
+            completion = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                temperature=0.4,  # Slightly higher for more variety
+                messages=[
+                    {"role": "system", "content": "You are a music curator expert. Generate specific search queries for individual tracks. Always respond with valid JSON only."},
+                    {"role": "user", "content": search_prompt}
+                ],
+            )
+            
+            response_text = completion.choices[0].message.content.strip()
+            print(response_text)
+            # Remove markdown code blocks if present
+            if response_text.startswith("```"):
+                # Remove opening ```json or ``` and closing ```
+                lines = response_text.split('\n')
+                if lines[0].startswith("```"):
+                    lines = lines[1:]  # Remove first line
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]  # Remove last line
+                response_text = '\n'.join(lines).strip()
+            
+            # Parse the JSON response
+            try:
+                queries = json.loads(response_text)
+                if isinstance(queries, list) and all(isinstance(q, str) for q in queries):
+                    return queries[:track_count]  # Ensure we get exactly the requested number
+                else:
+                    raise ValueError("Invalid format")
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"JSON parsing error in generate_individual_track_searches: {e}")
+                print(f"Response text: {response_text}")
+                import traceback
+                traceback.print_exc()
+                # Fallback to basic keyword extraction
+                return self._fallback_individual_searches(prompt, track_count)
+                
+        except Exception as e:
+            print(f"LLM individual track search generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return self._fallback_individual_searches(prompt, track_count)
+
+

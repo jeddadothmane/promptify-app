@@ -11,7 +11,7 @@ from .utils import load_html_template, execute_spotify_tool
 # This will look for .env in the current directory and parent directories
 load_dotenv()
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = BASE_DIR / "view"
 
 app = FastAPI(
@@ -68,16 +68,11 @@ async def ask(body: AskRequest):
                 return AskResponse(
                     answer="I detected you're asking about music, but I couldn't determine the specific Spotify action you want. Try asking about your top artists, top tracks, recently played songs, current playback, or playlists."
                 )
-        
-        # Regular OpenAI response for non-Spotify prompts
-        answer = openai_client.generate_response(
-            prompt=body.prompt,
-            system_message=body.system,
-            model=body.model,
-            temperature=body.temperature
-        )
-        return AskResponse(answer=answer.strip())
-        
+        else :
+            return AskResponse(
+                answer="I'm here to help you with your Spotify request, please how can I help you ?."
+            )
+
     except Exception as e:
         # Surface a clean 502 to the client while logging the real cause server-side
         raise HTTPException(status_code=502, detail=f"Upstream AI error: {e}")
