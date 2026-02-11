@@ -36,7 +36,7 @@ Before you begin, ensure you have the following:
 ### 1. Clone the Repository
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/jeddadothmane/promptify-app.git
 cd promptify-app
 ```
 
