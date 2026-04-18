@@ -1,5 +1,7 @@
 .env
 .venv/
-venv/
-.cache
-.idea/
+/venv/
+/.cache
+/.idea/
+__pycache__/
+/k8s/

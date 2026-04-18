@@ -1,11 +1,14 @@
+import logging
 from openai import OpenAI
 import os
 import json
 from typing import Dict, Any, Optional, List
 from dotenv import load_dotenv
+from app.config import OPENAI_MODEL, OPENAI_TEMPERATURE_ROUTING, OPENAI_TEMPERATURE_CREATIVE
 
-# Load environment variables
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 class OpenAIClient:
     """OpenAI client wrapper with Spotify tool detection and response generation"""
@@ -13,97 +16,102 @@ class OpenAIClient:
     def __init__(self):
         self.client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     
-    def detect_spotify_intent(self, prompt: str) -> Dict[str, Any]:
-        """Detect if the prompt requires Spotify functionality"""
+    async def analyze_prompt(self, prompt: str, available_tools: list) -> Dict[str, Any]:
+        """Single LLM call: detect Spotify intent and select the right tool + parameters."""
+
+        analysis_prompt = f"""
+        You are an AI assistant for a Spotify app. Analyze the user's message and decide two things:
+        1. Does this request require Spotify data? (yes/no)
+        2. If yes, which tool should be used and with what parameters?
+
+        User message: "{prompt}"
+
+        Available Spotify tools:
+        {json.dumps(available_tools, indent=2)}
+
+        Rules:
+        - Set "requires_spotify" to true only if the user is asking about music, their Spotify data, playback, playlists, artists, tracks, or wants a playlist created.
+        - If "requires_spotify" is false, set "tool" to null and "parameters" to {{}}.
+        - Extract any numbers mentioned for limits (e.g. "top 5" → limit=5).
+        - For playlist creation requests, always pass the full original prompt as the "prompt" parameter.
+
+        Examples:
+        - "What are my top 5 artists?" → requires_spotify=true, tool=get_top_artists, limit=5
+        - "What's currently playing?" → requires_spotify=true, tool=get_current_playback
+        - "Find songs by Taylor Swift" → requires_spotify=true, tool=search_tracks, query="Taylor Swift"
+        - "Create a workout playlist with 20 songs" → requires_spotify=true, tool=create_playlist_from_prompt, prompt="Create a workout playlist with 20 songs"
+        - "What is the capital of France?" → requires_spotify=false
+
+        Respond with ONLY a JSON object in this exact format:
+        {{
+            "requires_spotify": true or false,
+            "tool": "tool_name or null",
+            "parameters": {{"param1": "value1"}},
+            "reasoning": "one sentence explanation"
+        }}
+        """
+
+        logger.info("analyze_prompt | prompt=%r | model=%s | temperature=%s", prompt, OPENAI_MODEL, OPENAI_TEMPERATURE_ROUTING)
+        try:
+            completion = self.client.chat.completions.create(
+                model=OPENAI_MODEL,
+                temperature=OPENAI_TEMPERATURE_ROUTING,
+                messages=[
+                    {"role": "system", "content": "You are a Spotify assistant routing expert. Always respond with valid JSON only."},
+                    {"role": "user", "content": analysis_prompt}
+                ],
+            )
+
+            response_text = completion.choices[0].message.content.strip()
+
+            if response_text.startswith("```"):
+                lines = response_text.split('\n')
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                response_text = '\n'.join(lines).strip()
+
+            try:
+                result = json.loads(response_text)
+                parsed = {
+                    "requires_spotify": bool(result.get("requires_spotify", False)),
+                    "tool": result.get("tool") or None,
+                    "parameters": result.get("parameters", {}),
+                    "reasoning": result.get("reasoning", "")
+                }
+                logger.info("analyze_prompt result | requires_spotify=%s | tool=%s | reasoning=%r",
+                            parsed["requires_spotify"], parsed["tool"], parsed["reasoning"])
+                return parsed
+            except json.JSONDecodeError:
+                logger.warning("analyze_prompt | LLM returned invalid JSON, falling back to keyword detection")
+                return self._fallback_full_analysis(prompt)
+
+        except Exception as e:
+            logger.error("analyze_prompt | LLM call failed: %s — falling back to keyword detection", e)
+            return self._fallback_full_analysis(prompt)
+
+    def _fallback_full_analysis(self, prompt: str) -> Dict[str, Any]:
+        """Fallback when the combined LLM call fails: keyword intent check + keyword tool selection."""
         prompt_lower = prompt.lower()
-        
-        # Keywords that indicate Spotify functionality
+
         spotify_keywords = [
             "top artists", "top tracks", "favorite artists", "favorite songs",
             "recently played", "current song", "what's playing", "playlist",
             "spotify", "music", "song", "artist", "album", "play"
         ]
-        
-        # Check for Spotify-related keywords
-        for keyword in spotify_keywords:
-            if keyword in prompt_lower:
-                return {"requires_spotify": True, "intent": keyword}
-        
-        return {"requires_spotify": False}
-    
-    async def determine_spotify_tool_with_llm(self, prompt: str, available_tools: list) -> Dict[str, Any]:
-        """Use LLM to intelligently determine which Spotify tool to use based on user intent"""
-        
-        # Create a detailed prompt for the LLM to analyze user intent
-        tool_analysis_prompt = f"""
-        Analyze the user's request and determine which Spotify tool to use. The user said: "{prompt}"
+        requires_spotify = any(kw in prompt_lower for kw in spotify_keywords)
 
-        Available Spotify tools:
-        {json.dumps(available_tools, indent=2)}
+        if not requires_spotify:
+            return {"requires_spotify": False, "tool": None, "parameters": {}, "reasoning": "No Spotify keywords found"}
 
-        Based on the user's request, determine:
-        1. Which tool to use (or "none" if no tool matches)
-        2. What parameters to pass to the tool
-        3. Extract any numbers mentioned (for limits)
-
-        Examples:
-        - "What are my top 5 artists?" → get_top_artists with limit=5
-        - "Show me my favorite songs" → get_top_tracks with limit=5
-        - "What's currently playing?" → get_current_playback
-        - "What did I listen to recently?" → get_recently_played
-        - "Find songs by Taylor Swift" → search_tracks with query="Taylor Swift"
-        - "What playlists do I have?" → get_user_playlists
-        - "Make me a playlist of 15 tracks combining melodic death/black metal" → create_playlist_from_prompt with prompt="Make me a playlist of 15 tracks combining melodic death/black metal"
-        - "Create a workout playlist with 20 songs" → create_playlist_from_prompt with prompt="Create a workout playlist with 20 songs"
-        - "Generate a chill playlist for studying" → create_playlist_from_prompt with prompt="Generate a chill playlist for studying"
-
-        Respond with ONLY a JSON object in this exact format:
-        {{
-            "tool": "tool_name_or_none",
-            "parameters": {{"param1": "value1", "param2": "value2"}},
-            "reasoning": "brief explanation of why this tool was chosen"
-        }}
-        """
-        
-        try:
-            # Use OpenAI to analyze the user's intent
-            completion = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0.1,  # Low temperature for consistent tool selection
-                messages=[
-                    {"role": "system", "content": "You are a tool selection expert. Analyze user requests and determine the appropriate Spotify tool to use. Always respond with valid JSON only."},
-                    {"role": "user", "content": tool_analysis_prompt}
-                ],
-            )
-            
-            response_text = completion.choices[0].message.content.strip()
-            
-            # Remove markdown code blocks if present
-            if response_text.startswith("```"):
-                # Remove opening ```json or ``` and closing ```
-                lines = response_text.split('\n')
-                if lines[0].startswith("```"):
-                    lines = lines[1:]  # Remove first line
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]  # Remove last line
-                response_text = '\n'.join(lines).strip()
-            
-            # Parse the JSON response
-            try:
-                result = json.loads(response_text)
-                return {
-                    "tool": result.get("tool"),
-                    "parameters": result.get("parameters", {}),
-                    "reasoning": result.get("reasoning", "")
-                }
-            except json.JSONDecodeError:
-                # Fallback to keyword detection if LLM response is invalid
-                return self.fallback_keyword_detection(prompt)
-                
-        except Exception as e:
-            # Fallback to keyword detection if LLM call fails
-            print(f"LLM tool detection failed: {e}")
-            return self.fallback_keyword_detection(prompt)
+        tool_info = self.fallback_keyword_detection(prompt)
+        return {
+            "requires_spotify": True,
+            "tool": tool_info["tool"],
+            "parameters": tool_info["parameters"],
+            "reasoning": tool_info["reasoning"]
+        }
     
     def fallback_keyword_detection(self, prompt: str) -> Dict[str, Any]:
         """Fallback keyword-based tool detection if LLM fails"""
@@ -142,7 +150,7 @@ class OpenAIClient:
         
         return {"tool": None, "parameters": {}, "reasoning": "No matching tool found"}
     
-    def generate_response(self, prompt: str, system_message: str, model: str = "gpt-4o-mini", temperature: float = 0.7) -> str:
+    def generate_response(self, prompt: str, system_message: str, model: str = OPENAI_MODEL, temperature: float = OPENAI_TEMPERATURE_CREATIVE) -> str:
         """Generate a response using OpenAI"""
         try:
             completion = self.client.chat.completions.create(
@@ -157,9 +165,11 @@ class OpenAIClient:
         except Exception as e:
             raise Exception(f"OpenAI API error: {str(e)}")
     
-    def generate_spotify_enhanced_response(self, user_prompt: str, system_message: str, spotify_data: Dict[str, Any], 
-                                         tool_info: Dict[str, Any], model: str = "gpt-4o-mini", temperature: float = 0.7) -> str:
+    def generate_spotify_enhanced_response(self, user_prompt: str, system_message: str, spotify_data: Dict[str, Any],
+                                         tool_info: Dict[str, Any], model: str = OPENAI_MODEL, temperature: float = OPENAI_TEMPERATURE_CREATIVE) -> str:
         """Generate a response with Spotify data context"""
+        logger.info("generate_spotify_enhanced_response | tool=%s | model=%s | temperature=%s",
+                    tool_info.get("tool"), model, temperature)
         enhanced_prompt = f"""
         User asked: "{user_prompt}"
         
@@ -310,76 +320,73 @@ class OpenAIClient:
         
         return queries[:5] if queries else [prompt[:50]]
 
-    def generate_individual_track_searches(self, prompt: str, track_count: int) -> List[str]:
-        """Generate individual search queries for each track in the playlist using LLM"""
+    def generate_playlist_plan(self, prompt: str, track_count: int) -> Dict[str, Any]:
+        """Ask the LLM to curate a full playlist plan: name, description, and specific tracks."""
+        plan_prompt = f"""
+        You are an expert music curator. The user wants a playlist based on this request: "{prompt}"
+
+        Your job is to recommend {track_count} real, specific songs that perfectly match the request.
+
+        Guidelines:
+        - Pick real songs by real artists that actually exist on Spotify.
+        - Ensure variety: different artists, moods, tempos, and sub-styles within the theme.
+        - Come up with a creative, fitting playlist name (not generic like "My Playlist").
+        - Write a short, evocative playlist description (1-2 sentences).
+
+        Respond with ONLY a JSON object in this exact format:
+        {{
+            "name": "playlist name",
+            "description": "playlist description",
+            "tracks": [
+                {{"title": "Song Title", "artist": "Artist Name"}},
+                ...
+            ]
+        }}
+
+        The "tracks" array must contain exactly {track_count} entries.
+        """
+
+        logger.info("generate_playlist_plan | prompt=%r | track_count=%d | model=%s | temperature=%s",
+                    prompt, track_count, OPENAI_MODEL, OPENAI_TEMPERATURE_CREATIVE)
         try:
-            search_prompt = f"""
-            You are a music curator expert. Given a user's playlist request, generate {track_count} specific search queries - one for each track that should be in the playlist.
-
-            User request: "{prompt}"
-            Number of tracks needed: {track_count}
-
-            Guidelines:
-            1. Create {track_count} diverse, specific search queries
-            2. Each query should target a different aspect/style within the requested genre/mood
-            3. Include variety in artists, sub-genres, moods, and styles
-            4. Make each query specific enough to find 1-3 good tracks
-            5. Avoid duplicate queries
-            6. Use terms that Spotify's search will understand well
-
-            Examples for "Make me a workout playlist with 5 tracks":
-            ["high energy workout", "motivational gym music", "intense cardio tracks", "power workout songs", "energetic fitness music"]
-
-            Examples for "Melodic death metal playlist with 3 tracks":
-            ["melodic death metal classics", "modern melodic death", "melodic blackened death"]
-
-            Examples for "Chill study music with 4 tracks":
-            ["ambient study music", "lo-fi hip hop", "acoustic instrumental", "soft electronic"]
-
-            Respond with ONLY a JSON array of exactly {track_count} search queries:
-            ["query1", "query2", "query3", ...]
-            """
-            
             completion = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0.4,  # Slightly higher for more variety
+                model=OPENAI_MODEL,
+                temperature=OPENAI_TEMPERATURE_CREATIVE,
                 messages=[
-                    {"role": "system", "content": "You are a music curator expert. Generate specific search queries for individual tracks. Always respond with valid JSON only."},
-                    {"role": "user", "content": search_prompt}
+                    {"role": "system", "content": "You are an expert music curator. Always respond with valid JSON only."},
+                    {"role": "user", "content": plan_prompt}
                 ],
             )
-            
+
             response_text = completion.choices[0].message.content.strip()
-            print(response_text)
-            # Remove markdown code blocks if present
+
             if response_text.startswith("```"):
-                # Remove opening ```json or ``` and closing ```
                 lines = response_text.split('\n')
                 if lines[0].startswith("```"):
-                    lines = lines[1:]  # Remove first line
+                    lines = lines[1:]
                 if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]  # Remove last line
+                    lines = lines[:-1]
                 response_text = '\n'.join(lines).strip()
-            
-            # Parse the JSON response
-            try:
-                queries = json.loads(response_text)
-                if isinstance(queries, list) and all(isinstance(q, str) for q in queries):
-                    return queries[:track_count]  # Ensure we get exactly the requested number
-                else:
-                    raise ValueError("Invalid format")
-            except (json.JSONDecodeError, ValueError) as e:
-                print(f"JSON parsing error in generate_individual_track_searches: {e}")
-                print(f"Response text: {response_text}")
-                import traceback
-                traceback.print_exc()
-                # Fallback to basic keyword extraction
-                return self._fallback_individual_searches(prompt, track_count)
-                
+
+            result = json.loads(response_text)
+
+            if not isinstance(result.get("tracks"), list):
+                raise ValueError("Missing tracks list")
+
+            plan = {
+                "name": result.get("name", "Promptify Playlist"),
+                "description": result.get("description", "Created by Promptify, your AI Spotify assistant."),
+                "tracks": result["tracks"][:track_count]
+            }
+            logger.info("generate_playlist_plan | name=%r | tracks_planned=%d", plan["name"], len(plan["tracks"]))
+            return plan
+
         except Exception as e:
-            print(f"LLM individual track search generation failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return self._fallback_individual_searches(prompt, track_count)
+            logger.error("generate_playlist_plan | LLM call failed: %s", e)
+            return {
+                "name": "Promptify Playlist",
+                "description": "Created by Promptify, your AI Spotify assistant.",
+                "tracks": []
+            }
 
 

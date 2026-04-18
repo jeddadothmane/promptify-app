@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from spotipy import Spotify
@@ -6,6 +7,8 @@ import os
 import json
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+logger = logging.getLogger(__name__)
 
 class SpotifyMCPTools:
     """Spotify MCP Tools for interacting with Spotify API"""
@@ -47,7 +50,7 @@ class SpotifyMCPTools:
         """Get user's top artists"""
         if not self.sp:
             return {"error": "Not authenticated with Spotify"}
-        
+        logger.info("get_top_artists | limit=%d | time_range=%s", limit, time_range)
         try:
             results = self.sp.current_user_top_artists(limit=limit, time_range=time_range)
             artists = []
@@ -59,15 +62,17 @@ class SpotifyMCPTools:
                     "followers": artist['followers']['total'],
                     "external_urls": artist['external_urls']
                 })
+            logger.info("get_top_artists | returned %d artists", len(artists))
             return {"top_artists": artists}
         except Exception as e:
+            logger.error("get_top_artists | failed: %s", e)
             return {"error": f"Failed to get top artists: {str(e)}"}
-    
+
     async def get_top_tracks(self, limit: int = 5, time_range: str = "medium_term") -> Dict[str, Any]:
         """Get user's top tracks"""
         if not self.sp:
             return {"error": "Not authenticated with Spotify"}
-        
+        logger.info("get_top_tracks | limit=%d | time_range=%s", limit, time_range)
         try:
             results = self.sp.current_user_top_tracks(limit=limit, time_range=time_range)
             tracks = []
@@ -80,15 +85,17 @@ class SpotifyMCPTools:
                     "duration_ms": track['duration_ms'],
                     "external_urls": track['external_urls']
                 })
+            logger.info("get_top_tracks | returned %d tracks", len(tracks))
             return {"top_tracks": tracks}
         except Exception as e:
+            logger.error("get_top_tracks | failed: %s", e)
             return {"error": f"Failed to get top tracks: {str(e)}"}
-    
+
     async def get_recently_played(self, limit: int = 20) -> Dict[str, Any]:
         """Get user's recently played tracks"""
         if not self.sp:
             return {"error": "Not authenticated with Spotify"}
-        
+        logger.info("get_recently_played | limit=%d", limit)
         try:
             results = self.sp.current_user_recently_played(limit=limit)
             tracks = []
@@ -101,22 +108,26 @@ class SpotifyMCPTools:
                     "played_at": item['played_at'],
                     "external_urls": track['external_urls']
                 })
+            logger.info("get_recently_played | returned %d tracks", len(tracks))
             return {"recently_played": tracks}
         except Exception as e:
+            logger.error("get_recently_played | failed: %s", e)
             return {"error": f"Failed to get recently played: {str(e)}"}
-    
+
     async def get_current_playback(self) -> Dict[str, Any]:
         """Get current playback state"""
         if not self.sp:
             return {"error": "Not authenticated with Spotify"}
-        
+        logger.info("get_current_playback | fetching playback state")
         try:
             playback = self.sp.current_playback()
             if playback:
+                track_name = playback['item']['name']
+                logger.info("get_current_playback | is_playing=%s | track=%r", playback['is_playing'], track_name)
                 return {
                     "is_playing": playback['is_playing'],
                     "track": {
-                        "name": playback['item']['name'],
+                        "name": track_name,
                         "artists": [artist['name'] for artist in playback['item']['artists']],
                         "album": playback['item']['album']['name'],
                         "duration_ms": playback['item']['duration_ms'],
@@ -125,15 +136,17 @@ class SpotifyMCPTools:
                     "device": playback['device']['name'] if playback['device'] else None
                 }
             else:
+                logger.info("get_current_playback | no active playback")
                 return {"message": "No active playback"}
         except Exception as e:
+            logger.error("get_current_playback | failed: %s", e)
             return {"error": f"Failed to get current playback: {str(e)}"}
-    
+
     async def search_tracks(self, query: str, limit: int = 10) -> Dict[str, Any]:
         """Search for tracks"""
         if not self.sp:
             return {"error": "Not authenticated with Spotify"}
-        
+        logger.info("search_tracks | query=%r | limit=%d", query, limit)
         try:
             results = self.sp.search(q=query, type='track', limit=limit)
             tracks = []
@@ -145,15 +158,17 @@ class SpotifyMCPTools:
                     "popularity": track['popularity'],
                     "external_urls": track['external_urls']
                 })
+            logger.info("search_tracks | returned %d results for query=%r", len(tracks), query)
             return {"search_results": tracks}
         except Exception as e:
+            logger.error("search_tracks | failed: %s", e)
             return {"error": f"Failed to search tracks: {str(e)}"}
-    
+
     async def get_user_playlists(self, limit: int = 20) -> Dict[str, Any]:
         """Get user's playlists"""
         if not self.sp:
             return {"error": "Not authenticated with Spotify"}
-        
+        logger.info("get_user_playlists | limit=%d", limit)
         try:
             playlists = self.sp.current_user_playlists(limit=limit)
             playlist_list = []
@@ -165,137 +180,110 @@ class SpotifyMCPTools:
                     "public": playlist['public'],
                     "external_urls": playlist['external_urls']
                 })
+            logger.info("get_user_playlists | returned %d playlists", len(playlist_list))
             return {"playlists": playlist_list}
         except Exception as e:
+            logger.error("get_user_playlists | failed: %s", e)
             return {"error": f"Failed to get playlists: {str(e)}"}
-    
+
     async def create_playlist_from_prompt(self, prompt: str, playlist_name: str = None, description: str = None, public: bool = True) -> Dict[str, Any]:
-        """Create a playlist based on user prompt using LLM-generated individual track searches"""
+        """Create a playlist based on user prompt using LLM-curated specific tracks."""
         if not self.sp:
             return {"error": "Not authenticated with Spotify"}
-        
+
+        logger.info("create_playlist_from_prompt | prompt=%r", prompt)
         try:
-            # Import OpenAI client for generating search queries
             from .open_ai_client import OpenAIClient
-            openai_client = OpenAIClient()
-            
-            # Generate playlist name if not provided
-            if not playlist_name:
-                playlist_name = f"Promptify Playlist"
-            
-            # Generate description if not provided
-            if not description:
-                description = "This Playlist was created by Promptify, your personal AI spotify assistant."
-            
-            # Extract number if mentioned in prompt
             import re
+            openai_client = OpenAIClient()
+
             numbers = re.findall(r'\d+', prompt)
             track_limit = int(numbers[0]) if numbers else 15
-            
-            # Use LLM to generate individual search queries for each track
-            individual_queries = openai_client.generate_individual_track_searches(prompt, track_limit)
-            
-            # Create the playlist first
+            logger.info("create_playlist_from_prompt | track_limit=%d", track_limit)
+
+            plan = openai_client.generate_playlist_plan(prompt, track_limit)
+            logger.info("create_playlist_from_prompt | plan ready | name=%r | tracks_planned=%d",
+                        plan["name"], len(plan["tracks"]))
+
+            final_name = playlist_name or plan["name"]
+            final_description = description or plan["description"]
+
             user_id = self.sp.current_user()['id']
             playlist = self.sp.user_playlist_create(
                 user=user_id,
-                name=playlist_name,
+                name=final_name,
                 public=public,
-                description=description
+                description=final_description
             )
-            
-            # Search for individual tracks using LLM-generated queries
+            logger.info("create_playlist_from_prompt | playlist created | id=%s | name=%r",
+                        playlist['id'], playlist['name'])
+
             track_uris = []
             track_details = []
-            successful_searches = []
-            
-            for i, query in enumerate(individual_queries):
+
+            for track_suggestion in plan["tracks"]:
+                if len(track_uris) >= track_limit:
+                    break
+
+                title = track_suggestion.get("title", "")
+                artist = track_suggestion.get("artist", "")
+                query = f"track:{title} artist:{artist}"
+
                 try:
-                    # Search for 1-3 tracks with this specific query
-                    search_results = self.sp.search(q=query, type='track', limit=3)
-                    
-                    if search_results['tracks']['items']:
-                        # Take the first (best) result from this search
-                        best_track = search_results['tracks']['items'][0]
-                        
-                        # Check if we already have this track (avoid duplicates)
-                        if best_track['uri'] not in track_uris:
-                            track_uris.append(best_track['uri'])
+                    results = self.sp.search(q=query, type='track', limit=3)
+                    items = results['tracks']['items']
+
+                    if not items:
+                        logger.debug("create_playlist_from_prompt | field-filtered search empty, loosening | title=%r artist=%r", title, artist)
+                        results = self.sp.search(q=f"{title} {artist}", type='track', limit=3)
+                        items = results['tracks']['items']
+
+                    if items:
+                        best = items[0]
+                        if best['uri'] not in track_uris:
+                            track_uris.append(best['uri'])
                             track_details.append({
-                                "name": best_track['name'],
-                                "artist": best_track['artists'][0]['name'],
-                                "album": best_track['album']['name'],
-                                "uri": best_track['uri'],
-                                "search_query": query
+                                "intended": f"{title} by {artist}",
+                                "found": f"{best['name']} by {best['artists'][0]['name']}",
+                                "album": best['album']['name'],
+                                "uri": best['uri']
                             })
-                            successful_searches.append({
-                                "query": query,
-                                "track_found": f"{best_track['name']} by {best_track['artists'][0]['name']}"
-                            })
-                        
-                        # If we have enough tracks, break
-                        if len(track_uris) >= track_limit:
-                            break
-                    
+                            logger.info("create_playlist_from_prompt | track matched | intended=%r | found=%r",
+                                        f"{title} by {artist}", f"{best['name']} by {best['artists'][0]['name']}")
+                    else:
+                        logger.warning("create_playlist_from_prompt | no match found | title=%r | artist=%r", title, artist)
+
                 except Exception as e:
-                    print(f"Search failed for query '{query}': {e}")
+                    logger.error("create_playlist_from_prompt | search error | title=%r | artist=%r | error=%s", title, artist, e)
                     continue
-            
-            # If we still don't have enough tracks, try fallback searches
-            if len(track_uris) < track_limit:
-                remaining_needed = track_limit - len(track_uris)
-                keywords = prompt.lower().split()
-                stop_words = ['make', 'me', 'a', 'playlist', 'of', 'tracks', 'songs', 'with', 'combining', 'and', 'or', 'the', 'for', 'create', 'generate', 'build']
-                search_terms = [word for word in keywords if word not in stop_words]
-                
-                if search_terms:
-                    fallback_query = ' '.join(search_terms[:3])
-                    try:
-                        fallback_results = self.sp.search(q=fallback_query, type='track', limit=remaining_needed * 2)
-                        for track in fallback_results['tracks']['items']:
-                            if track['uri'] not in track_uris and len(track_uris) < track_limit:
-                                track_uris.append(track['uri'])
-                                track_details.append({
-                                    "name": track['name'],
-                                    "artist": track['artists'][0]['name'],
-                                    "album": track['album']['name'],
-                                    "uri": track['uri'],
-                                    "search_query": f"fallback: {fallback_query}"
-                                })
-                                successful_searches.append({
-                                    "query": f"fallback: {fallback_query}",
-                                    "track_found": f"{track['name']} by {track['artists'][0]['name']}"
-                                })
-                    except Exception as e:
-                        print(f"Fallback search failed: {e}")
-            
-            # Add tracks to playlist
+
             if track_uris:
                 self.sp.user_playlist_add_tracks(
                     user=user_id,
                     playlist_id=playlist['id'],
-                    tracks=track_uris[:track_limit]
+                    tracks=track_uris
                 )
-            
+                logger.info("create_playlist_from_prompt | done | tracks_added=%d / %d requested",
+                            len(track_uris), track_limit)
+
             return {
                 "playlist": {
                     "id": playlist['id'],
                     "name": playlist['name'],
                     "description": playlist['description'],
                     "public": playlist['public'],
-                    "tracks_added": len(track_uris[:track_limit]),
+                    "tracks_added": len(track_uris),
                     "external_urls": playlist['external_urls']
                 },
                 "track_details": track_details,
-                "search_results": successful_searches,
-                "tracks_found": len(track_uris),
-                "individual_search_method": True,
-                "llm_enhanced": True
+                "tracks_requested": track_limit,
+                "tracks_found": len(track_uris)
             }
-            
+
         except Exception as e:
+            logger.exception("create_playlist_from_prompt | unhandled error: %s", e)
             return {"error": f"Failed to create playlist: {str(e)}"}
-    
+
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """Get list of available Spotify tools"""
         try:
@@ -305,8 +293,8 @@ class SpotifyMCPTools:
                     raise ValueError("spotify_tools.json must contain a list of tools")
                 return tools
         except FileNotFoundError:
-            print(f"[WARN] JSON file not found: {self.data_file}")
+            logger.warning("get_available_tools | JSON file not found: %s", self.data_file)
             return []
         except json.JSONDecodeError as e:
-            print(f"[ERROR] Invalid JSON in {self.data_file}: {e}")
+            logger.error("get_available_tools | invalid JSON in %s: %s", self.data_file, e)
             return []
