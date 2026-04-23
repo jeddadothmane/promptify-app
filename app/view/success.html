@@ -43,7 +43,8 @@
     {
     "access_token": "{{ACCESS_TOKEN}}",
     "expires_in": {{EXPIRES_IN}},
-    "refresh_token": "{{REFRESH_TOKEN}}"
+    "refresh_token": "{{REFRESH_TOKEN}}",
+    "user_id": "{{USER_ID}}"
     }
     </script>
 
@@ -71,7 +72,7 @@
         return typeof v === "string" && /\{\{.*\}\}/.test(v);
     }
 
-    function storeTokens({ access_token, expires_in, refresh_token }) {
+    function storeTokens({ access_token, expires_in, refresh_token, user_id }) {
         if (!hasLocalStorage()) {
         console.warn("localStorage is not available; tokens cannot be persisted.");
         return false;
@@ -94,8 +95,11 @@
         if (refresh_token && !isTemplatedLiteral(refresh_token)) {
         localStorage.setItem("spotify_refresh_token", refresh_token);
         }
+        if (user_id && !isTemplatedLiteral(user_id)) {
+        localStorage.setItem("spotify_user_id", user_id);
+        }
 
-        console.log("✅ Stored spotify_token, spotify_token_expiry, spotify_refresh_token (if provided).");
+        console.log("✅ Stored spotify_token, spotify_token_expiry, spotify_user_id (if provided).");
         return true;
     }
 
@@ -124,7 +128,8 @@
         const ok = storeTokens({
         access_token: data.access_token,
         expires_in: data.expires_in,
-        refresh_token: data.refresh_token
+        refresh_token: data.refresh_token,
+        user_id: data.user_id
         });
 
         if (ok) {

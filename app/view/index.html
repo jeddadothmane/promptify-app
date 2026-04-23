@@ -3,581 +3,670 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Promptify App - AI-Powered Spotify Integration</title>
+    <title>Promptify — AI Spotify Assistant</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --green:      #1db954;
+            --green-dim:  #17a349;
+            --purple:     #764ba2;
+            --purple-dim: #5a3880;
+            --bg:         #0d0d0d;
+            --sidebar-bg: #111111;
+            --chat-bg:    #161616;
+            --border:     #2a2a2a;
+            --text:       #e8e8e8;
+            --text-muted: #888;
+            --user-bubble:    #764ba2;
+            --assist-bubble:  #1e1e1e;
         }
 
-        body {
+        html, body {
+            height: 100%;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-
-        .container {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            padding: 40px;
-            max-width: 800px;
-            width: 100%;
-            position: relative;
+            background: var(--bg);
+            color: var(--text);
             overflow: hidden;
         }
 
-        .container::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #1db954, #1ed760);
+        /* ── LAYOUT ─────────────────────────────────────────── */
+        .app {
+            display: flex;
+            height: 100vh;
         }
 
-        .header {
+        /* ── SIDEBAR ─────────────────────────────────────────── */
+        .sidebar {
+            width: 280px;
+            min-width: 280px;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 28px 20px;
+            gap: 24px;
+        }
+
+        .brand {
             text-align: center;
-            margin-bottom: 40px;
         }
 
-        .header h1 {
-            color: #333;
-            font-size: 2.5rem;
-            margin-bottom: 10px;
+        .brand-icon {
+            font-size: 2.4rem;
+            line-height: 1;
+            margin-bottom: 8px;
+        }
+
+        .brand h1 {
+            font-size: 1.4rem;
             font-weight: 700;
+            background: linear-gradient(135deg, var(--green), #9b59b6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
-        .header p {
-            color: #666;
-            font-size: 1.1rem;
+        .brand p {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 4px;
         }
 
-        .auth-section {
-            background: #f8f9fa;
-            border-radius: 15px;
-            padding: 30px;
-            margin-bottom: 30px;
-            text-align: center;
+        .divider {
+            height: 1px;
+            background: var(--border);
+        }
+
+        /* auth */
+        .auth-section { display: flex; flex-direction: column; gap: 12px; }
+
+        .auth-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
         }
 
         .auth-status {
             display: flex;
             align-items: center;
-            justify-content: center;
-            gap: 10px;
-            margin-bottom: 20px;
+            gap: 8px;
+            font-size: 0.85rem;
         }
 
-        .status-indicator {
-            width: 12px;
-            height: 12px;
+        .dot {
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
-            background: #dc3545;
+            background: #e74c3c;
+            flex-shrink: 0;
             animation: pulse 2s infinite;
         }
 
-        .status-indicator.connected {
-            background: #28a745;
-        }
+        .dot.connected { background: var(--green); animation: none; }
 
         @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.35; }
         }
 
-        .btn {
-            background: linear-gradient(135deg, #1db954, #1ed760);
-            color: white;
+        .btn-login {
+            background: var(--green);
+            color: #000;
             border: none;
-            padding: 15px 30px;
-            border-radius: 50px;
-            font-size: 1rem;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.2s;
+            text-align: center;
+        }
+
+        .btn-login:hover { background: var(--green-dim); }
+
+        .btn-new-chat {
+            background: transparent;
+            color: var(--text);
+            border: 1px solid var(--border);
+            padding: 9px 16px;
+            border-radius: 8px;
+            font-size: 0.82rem;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
-            text-decoration: none;
-            display: inline-block;
+            transition: all 0.18s;
+            text-align: center;
         }
 
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(29, 185, 84, 0.3);
-        }
+        .btn-new-chat:hover { border-color: var(--green); color: var(--green); }
 
-        .btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .chat-container {
-            background: #f8f9fa;
-            border-radius: 15px;
-            padding: 30px;
-            margin-bottom: 30px;
-            min-height: 400px;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .chat-messages {
-            flex: 1;
-            overflow-y: auto;
-            margin-bottom: 20px;
-            max-height: 300px;
-            padding: 10px;
-        }
-
-        .message {
-            margin-bottom: 15px;
-            padding: 15px;
-            border-radius: 15px;
-            max-width: 80%;
-            word-wrap: break-word;
-        }
-
-        .message.user {
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            margin-left: auto;
-            text-align: right;
-        }
-
-        .message.assistant {
-            background: white;
-            border: 2px solid #e9ecef;
-            color: #333;
-        }
-
-        .message.loading {
-            background: #e9ecef;
-            color: #666;
-            font-style: italic;
-        }
-
-        .input-section {
-            display: flex;
-            gap: 15px;
-            align-items: flex-end;
-        }
-
-        .input-container {
-            flex: 1;
-            position: relative;
-        }
-
-        .prompt-input {
-            width: 100%;
-            padding: 15px 20px;
-            border: 2px solid #e9ecef;
-            border-radius: 25px;
-            font-size: 1rem;
-            resize: vertical;
-            min-height: 50px;
-            max-height: 120px;
-            font-family: inherit;
-            transition: border-color 0.3s ease;
-        }
-
-        .prompt-input:focus {
-            outline: none;
-            border-color: #1db954;
-        }
-
-        .send-btn {
-            background: linear-gradient(135deg, #1db954, #1ed760);
-            color: white;
-            border: none;
-            padding: 15px 25px;
-            border-radius: 25px;
-            font-size: 1rem;
-            font-weight: 600;
+        .btn-logout {
+            background: transparent;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.8rem;
             cursor: pointer;
-            transition: all 0.3s ease;
-            white-space: nowrap;
+            transition: all 0.2s;
         }
 
-        .send-btn:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(29, 185, 84, 0.3);
+        .btn-logout:hover { border-color: #e74c3c; color: #e74c3c; }
+
+        .connected-badge {
+            background: rgba(29,185,84,0.12);
+            border: 1px solid rgba(29,185,84,0.3);
+            color: var(--green);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 0.78rem;
         }
 
-        .send-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
+        /* examples */
+        .examples-section { display: flex; flex-direction: column; gap: 10px; }
 
-        .examples {
-            background: #f8f9fa;
-            border-radius: 15px;
-            padding: 20px;
-        }
-
-        .examples h3 {
-            color: #333;
-            margin-bottom: 15px;
-            font-size: 1.2rem;
-        }
-
-        .example-buttons {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
+        .examples-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
         }
 
         .example-btn {
-            background: white;
-            color: #666;
-            border: 2px solid #e9ecef;
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-size: 0.9rem;
+            background: transparent;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.8rem;
             cursor: pointer;
-            transition: all 0.3s ease;
+            text-align: left;
+            transition: all 0.18s;
+            line-height: 1.4;
         }
 
         .example-btn:hover {
-            border-color: #1db954;
-            color: #1db954;
+            border-color: var(--green);
+            color: var(--green);
+            background: rgba(29,185,84,0.06);
         }
 
-        .token-info {
-            background: #e8f5e8;
-            border: 1px solid #28a745;
-            border-radius: 10px;
-            padding: 15px;
-            margin-top: 20px;
-            font-size: 0.9rem;
-            color: #155724;
+        /* ── CHAT PANEL ──────────────────────────────────────── */
+        .chat-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--chat-bg);
+            overflow: hidden;
         }
 
-        .error-message {
-            background: #f8d7da;
-            border: 1px solid #f5c6cb;
-            border-radius: 10px;
-            padding: 15px;
-            margin-top: 20px;
-            color: #721c24;
+        .chat-header {
+            padding: 18px 28px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--chat-bg);
+            flex-shrink: 0;
         }
 
-        .loading-spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #1db954;
+        .chat-header-dot {
+            width: 9px;
+            height: 9px;
             border-radius: 50%;
-            animation: spin 1s linear infinite;
+            background: #e74c3c;
+            flex-shrink: 0;
+        }
+
+        .chat-header-dot.connected { background: var(--green); }
+
+        .chat-header-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .chat-header-sub {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-left: auto;
+        }
+
+        /* messages feed */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+
+        .chat-messages::-webkit-scrollbar { width: 5px; }
+        .chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+        .message {
+            display: flex;
+            flex-direction: column;
+            max-width: 72%;
+            word-wrap: break-word;
+            animation: fadeUp 0.2s ease;
+        }
+
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user  { align-self: flex-end; align-items: flex-end; }
+        .message.assistant { align-self: flex-start; align-items: flex-start; }
+
+        .message-label {
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+
+        .message-bubble {
+            padding: 12px 16px;
+            border-radius: 16px;
+            font-size: 0.88rem;
+            line-height: 1.6;
+        }
+
+        .message.user .message-bubble {
+            background: var(--user-bubble);
+            color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant .message-bubble {
+            background: var(--assist-bubble);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-bottom-left-radius: 4px;
+        }
+
+        .message.loading .message-bubble {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        /* input bar */
+        .chat-input-bar {
+            padding: 20px 28px;
+            border-top: 1px solid var(--border);
+            background: var(--chat-bg);
+            flex-shrink: 0;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+            background: #1e1e1e;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 12px 16px;
+            transition: border-color 0.2s;
+        }
+
+        .input-row:focus-within { border-color: var(--green); }
+
+        .prompt-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text);
+            font-size: 0.9rem;
+            resize: none;
+            min-height: 22px;
+            max-height: 120px;
+            font-family: inherit;
+            line-height: 1.5;
+            outline: none;
+        }
+
+        .prompt-input::placeholder { color: #555; }
+
+        .send-btn {
+            background: var(--green);
+            color: #000;
+            border: none;
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            font-size: 1rem;
+            cursor: pointer;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s, transform 0.15s;
+        }
+
+        .send-btn:hover:not(:disabled) { background: var(--green-dim); transform: scale(1.05); }
+        .send-btn:disabled { background: #2a2a2a; color: #555; cursor: not-allowed; }
+
+        .input-hint {
+            font-size: 0.7rem;
+            color: #444;
+            margin-top: 8px;
+            text-align: center;
+        }
+
+        /* spinner */
+        .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid #333;
+            border-top-color: var(--green);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            flex-shrink: 0;
         }
 
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            to { transform: rotate(360deg); }
         }
 
-        @media (max-width: 768px) {
-            .container {
-                padding: 20px;
-                margin: 10px;
-            }
-
-            .header h1 {
-                font-size: 2rem;
-            }
-
-            .input-section {
-                flex-direction: column;
-            }
-
-            .example-buttons {
-                justify-content: center;
-            }
+        /* ── RESPONSIVE ──────────────────────────────────────── */
+        @media (max-width: 680px) {
+            .sidebar { width: 100%; min-width: unset; height: auto; border-right: none; border-bottom: 1px solid var(--border); overflow: visible; }
+            .app { flex-direction: column; }
+            .chat-panel { min-height: 0; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🎵 Promptify App</h1>
-            <p>AI-Powered Spotify Integration with MCP Tools</p>
+<div class="app">
+
+    <!-- ── SIDEBAR ───────────────────────────────────────────── -->
+    <aside class="sidebar">
+
+        <div class="brand">
+            <div class="brand-icon">🎵</div>
+            <h1>Promptify</h1>
+            <p>AI-Powered Spotify Assistant</p>
         </div>
+
+        <div class="divider"></div>
 
         <div class="auth-section">
+            <div class="auth-label">Spotify Account</div>
             <div class="auth-status">
-                <div class="status-indicator" id="statusIndicator"></div>
-                <span id="authStatus">Not connected to Spotify</span>
+                <div class="dot" id="statusDot"></div>
+                <span id="authStatus">Not connected</span>
             </div>
-            <button class="btn" id="loginBtn" onclick="loginToSpotify()">
-                🔐 Login with Spotify
+            <button class="btn-login" id="loginBtn" onclick="loginToSpotify()">
+                Login with Spotify
             </button>
-            <button class="btn" id="logoutBtn" onclick="logoutFromSpotify()" style="display: none; margin-left: 10px;">
-                🚪 Logout
+            <button class="btn-logout" id="logoutBtn" onclick="logoutFromSpotify()" style="display:none">
+                Disconnect
             </button>
-            <div id="tokenInfo" class="token-info" style="display: none;">
-                <strong>✅ Connected!</strong> Your Spotify token is automatically managed.
+            <div id="connectedBadge" class="connected-badge" style="display:none">
+                ✓ Token active — ready to chat
             </div>
         </div>
 
-        <div class="chat-container">
-            <div class="chat-messages" id="chatMessages">
-                <div class="message assistant">
-                    <strong>🤖 Assistant:</strong> Hello! I'm your AI assistant with Spotify integration. 
-                    Please login to Spotify first, then you can ask me questions about your music preferences, 
-                    top artists, tracks, and more!
+        <div class="divider"></div>
+
+        <button class="btn-new-chat" onclick="newChat()" id="newChatBtn" style="display:none">
+            + New chat
+        </button>
+
+        <div class="divider"></div>
+
+        <div class="examples-section">
+            <div class="examples-label">Quick prompts</div>
+            <button class="example-btn" onclick="useExample('What are my top 5 artists?')">🎤 Top 5 artists</button>
+            <button class="example-btn" onclick="useExample('What are my favorite songs?')">🎵 Favorite songs</button>
+            <button class="example-btn" onclick="useExample('What is currently playing?')">▶ Now playing</button>
+            <button class="example-btn" onclick="useExample('What did I listen to recently?')">🕒 Recent tracks</button>
+            <button class="example-btn" onclick="useExample('What playlists do I have?')">📋 My playlists</button>
+            <button class="example-btn" onclick="useExample('Search for songs by Taylor Swift')">🔍 Search music</button>
+            <button class="example-btn" onclick="useExample('Make me a playlist of 15 tracks combining melodic death/black metal')">✨ Create a playlist</button>
+        </div>
+
+    </aside>
+
+    <!-- ── CHAT PANEL ─────────────────────────────────────────── -->
+    <main class="chat-panel">
+
+        <div class="chat-header">
+            <div class="chat-header-dot" id="chatHeaderDot"></div>
+            <span class="chat-header-title">Chat</span>
+            <span class="chat-header-sub" id="chatHeaderSub">Connect Spotify to get started</span>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="message assistant">
+                <div class="message-label">Promptify</div>
+                <div class="message-bubble">
+                    Hey! I'm your AI assistant with Spotify integration.<br>
+                    Login on the left, then ask me anything about your music — top artists, recent tracks, or let me build you a custom playlist.
                 </div>
             </div>
-
-            <div class="input-section">
-                <div class="input-container">
-                    <textarea 
-                        class="prompt-input" 
-                        id="promptInput" 
-                        placeholder="Ask me about your music... (e.g., 'What are my top 5 artists?')"
-                        rows="2"
-                        disabled
-                    ></textarea>
-                </div>
-                <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled>
-                    Send
-                </button>
-            </div>
         </div>
 
-        <div class="examples">
-            <h3>💡 Try these examples:</h3>
-            <div class="example-buttons">
-                <button class="example-btn" onclick="useExample('What are my top 5 artists?')">
-                    Top 5 Artists
-                </button>
-                <button class="example-btn" onclick="useExample('What are my favorite songs?')">
-                    Favorite Songs
-                </button>
-                <button class="example-btn" onclick="useExample('What is currently playing?')">
-                    Now Playing
-                </button>
-                <button class="example-btn" onclick="useExample('What did I listen to recently?')">
-                    Recent Music
-                </button>
-                <button class="example-btn" onclick="useExample('What playlists do I have?')">
-                    My Playlists
-                </button>
-                <button class="example-btn" onclick="useExample('Search for songs by Taylor Swift')">
-                    Search Music
-                </button>
-                <button class="example-btn" onclick="useExample('Make me a playlist of 15 tracks combining melodic death/black metal')">
-                    Create Playlist
+        <div class="chat-input-bar">
+            <div class="input-row">
+                <textarea
+                    class="prompt-input"
+                    id="promptInput"
+                    placeholder="Ask about your music… (Enter to send, Shift+Enter for new line)"
+                    rows="1"
+                    disabled
+                ></textarea>
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled title="Send">
+                    ↑
                 </button>
             </div>
+            <div class="input-hint">Shift + Enter for a new line</div>
         </div>
-    </div>
 
-    <script>
-        let spotifyToken = null;
-        let isAuthenticated = false;
+    </main>
 
-        // Check authentication status on page load
-        window.onload = function() {
-            checkAuthStatus();
-        };
+</div>
 
-        async function checkAuthStatus() {
-            try {
-                // Check if we have a token in localStorage
-                const savedToken = localStorage.getItem('spotify_token');
-                const tokenExpiry = localStorage.getItem('spotify_token_expiry');
-                
-                if (savedToken && tokenExpiry && new Date() < new Date(tokenExpiry)) {
-                    spotifyToken = savedToken;
-                    isAuthenticated = true;
-                    updateAuthStatus(true);
-                } else {
-                    // Clear expired token
-                    localStorage.removeItem('spotify_token');
-                    localStorage.removeItem('spotify_token_expiry');
-                    updateAuthStatus(false);
-                }
-            } catch (error) {
-                console.error('Error checking auth status:', error);
-                updateAuthStatus(false);
-            }
-        }
+<script>
+    let spotifyToken      = null;
+    let isAuthenticated   = false;
+    let conversationId    = localStorage.getItem('conversation_id') || null;
 
-        function updateAuthStatus(authenticated) {
-            const statusIndicator = document.getElementById('statusIndicator');
-            const authStatus = document.getElementById('authStatus');
-            const loginBtn = document.getElementById('loginBtn');
-            const logoutBtn = document.getElementById('logoutBtn');
-            const tokenInfo = document.getElementById('tokenInfo');
-            const promptInput = document.getElementById('promptInput');
-            const sendBtn = document.getElementById('sendBtn');
+    function checkAuthStatus() {
+        const savedToken  = localStorage.getItem('spotify_token');
+        const tokenExpiry = localStorage.getItem('spotify_token_expiry');
 
-            if (authenticated) {
-                statusIndicator.classList.add('connected');
-                authStatus.textContent = 'Connected to Spotify';
-                loginBtn.textContent = '🔄 Reconnect to Spotify';
-                logoutBtn.style.display = 'inline-block';
-                tokenInfo.style.display = 'block';
-                promptInput.disabled = false;
-                sendBtn.disabled = false;
-            } else {
-                statusIndicator.classList.remove('connected');
-                authStatus.textContent = 'Not connected to Spotify';
-                loginBtn.textContent = '🔐 Login with Spotify';
-                logoutBtn.style.display = 'none';
-                tokenInfo.style.display = 'none';
-                promptInput.disabled = true;
-                sendBtn.disabled = true;
-            }
-        }
-
-        function loginToSpotify() {
-            // Check if user is already authenticated
-            if (isAuthenticated) {
-                // User is already logged in, show a friendly message
-                const chatMessages = document.getElementById('chatMessages');
-                const messageId = addMessage('assistant', 'You are already logged in to Spotify! You can start asking questions about your music right away. 🎵', false);
-                return;
-            }
-            
-            // User is not authenticated, proceed with login
-            window.location.href = '/login';
-        }
-
-        function logoutFromSpotify() {
-            // Clear stored tokens
+        if (savedToken && tokenExpiry && new Date() < new Date(tokenExpiry)) {
+            spotifyToken      = savedToken;
+            isAuthenticated   = true;
+            updateAuthStatus(true);
+        } else {
             localStorage.removeItem('spotify_token');
             localStorage.removeItem('spotify_token_expiry');
-            
-            // Reset authentication state
-            spotifyToken = null;
-            isAuthenticated = false;
-            
-            // Update UI
             updateAuthStatus(false);
-            
-            // Clear chat messages
-            const chatMessages = document.getElementById('chatMessages');
-            chatMessages.innerHTML = '<div class="message assistant"><strong>🤖 Assistant:</strong> You have been logged out. Please login again to continue using Spotify features.</div>';
-            
-            alert('Successfully logged out from Spotify!');
         }
+    }
 
-        function useExample(example) {
-            if (!isAuthenticated) {
-                alert('Please login to Spotify first!');
-                return;
-            }
-            document.getElementById('promptInput').value = example;
+    function updateAuthStatus(authenticated) {
+        const dot         = document.getElementById('statusDot');
+        const headerDot   = document.getElementById('chatHeaderDot');
+        const authStatus  = document.getElementById('authStatus');
+        const loginBtn    = document.getElementById('loginBtn');
+        const logoutBtn   = document.getElementById('logoutBtn');
+        const newChatBtn  = document.getElementById('newChatBtn');
+        const badge       = document.getElementById('connectedBadge');
+        const input       = document.getElementById('promptInput');
+        const sendBtn     = document.getElementById('sendBtn');
+        const headerSub   = document.getElementById('chatHeaderSub');
+
+        if (authenticated) {
+            dot.classList.add('connected');
+            headerDot.classList.add('connected');
+            authStatus.textContent    = 'Connected';
+            loginBtn.textContent      = 'Reconnect';
+            logoutBtn.style.display   = 'block';
+            newChatBtn.style.display  = 'block';
+            badge.style.display       = 'block';
+            input.disabled            = false;
+            sendBtn.disabled          = false;
+            headerSub.textContent     = 'Spotify connected';
+        } else {
+            dot.classList.remove('connected');
+            headerDot.classList.remove('connected');
+            authStatus.textContent    = 'Not connected';
+            loginBtn.textContent      = 'Login with Spotify';
+            logoutBtn.style.display   = 'none';
+            newChatBtn.style.display  = 'none';
+            badge.style.display       = 'none';
+            input.disabled            = true;
+            sendBtn.disabled          = true;
+            headerSub.textContent     = 'Connect Spotify to get started';
         }
+    }
 
-        async function sendMessage() {
-            const promptInput = document.getElementById('promptInput');
-            const sendBtn = document.getElementById('sendBtn');
-            const chatMessages = document.getElementById('chatMessages');
-            
-            const message = promptInput.value.trim();
-            if (!message) return;
+    function loginToSpotify() {
+        if (isAuthenticated) {
+            addMessage('assistant', 'You\'re already connected to Spotify! Go ahead and ask me anything. 🎵');
+            return;
+        }
+        window.location.href = '/login';
+    }
 
-            if (!isAuthenticated) {
-                alert('Please login to Spotify first!');
-                return;
-            }
+    function logoutFromSpotify() {
+        localStorage.removeItem('spotify_token');
+        localStorage.removeItem('spotify_token_expiry');
+        localStorage.removeItem('spotify_refresh_token');
+        localStorage.removeItem('spotify_user_id');
+        localStorage.removeItem('conversation_id');
+        spotifyToken    = null;
+        isAuthenticated = false;
+        conversationId  = null;
+        updateAuthStatus(false);
+        const chatMessages = document.getElementById('chatMessages');
+        chatMessages.innerHTML = '';
+        addMessage('assistant', 'You\'ve been disconnected. Login again whenever you\'re ready.');
+    }
 
-            // Add user message to chat
-            addMessage('user', message);
-            promptInput.value = '';
-            
-            // Add loading message
-            const loadingId = addMessage('assistant', 'Thinking...', true);
-            
-            // Disable send button
-            sendBtn.disabled = true;
-            sendBtn.innerHTML = '<div class="loading-spinner"></div>';
+    function newChat() {
+        conversationId = null;
+        localStorage.removeItem('conversation_id');
+        document.getElementById('chatMessages').innerHTML = '';
+        addMessage('assistant', 'New conversation started. What would you like to know about your music?');
+    }
 
-            try {
-                const response = await fetch('/ask', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        prompt: message,
-                        spotify_access_token: spotifyToken
-                    })
-                });
+    function useExample(example) {
+        if (!isAuthenticated) {
+            addMessage('assistant', 'Please connect to Spotify first using the button on the left.');
+            return;
+        }
+        const input = document.getElementById('promptInput');
+        input.value = example;
+        input.focus();
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    }
 
-                const data = await response.json();
-                
-                // Remove loading message
-                removeMessage(loadingId);
-                
-                if (response.ok) {
-                    addMessage('assistant', data.answer);
-                } else {
-                    addMessage('assistant', `Error: ${data.detail || 'Something went wrong'}`);
+    async function sendMessage() {
+        const input    = document.getElementById('promptInput');
+        const sendBtn  = document.getElementById('sendBtn');
+        const message  = input.value.trim();
+        if (!message) return;
+
+        addMessage('user', message);
+        input.value = '';
+        input.style.height = 'auto';
+
+        const loadingId = addMessage('assistant', 'Thinking…', true);
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<div class="spinner"></div>';
+
+        try {
+            const res  = await fetch('/ask', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: message,
+                    spotify_access_token: spotifyToken,
+                    conversation_id: conversationId
+                })
+            });
+            const data = await res.json();
+            removeMessage(loadingId);
+            if (res.ok) {
+                if (data.conversation_id) {
+                    conversationId = data.conversation_id;
+                    localStorage.setItem('conversation_id', conversationId);
                 }
-            } catch (error) {
-                removeMessage(loadingId);
-                addMessage('assistant', `Error: ${error.message}`);
-            } finally {
-                // Re-enable send button
-                sendBtn.disabled = false;
-                sendBtn.textContent = 'Send';
-            }
-        }
-
-        function addMessage(sender, content, isLoading = false) {
-            const chatMessages = document.getElementById('chatMessages');
-            const messageDiv = document.createElement('div');
-            const messageId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-            
-            messageDiv.id = messageId;
-            messageDiv.className = `message ${sender}`;
-            
-            if (isLoading) {
-                messageDiv.innerHTML = `<strong>🤖 Assistant:</strong> <div class="loading-spinner"></div> ${content}`;
+                addMessage('assistant', data.answer);
             } else {
-                const senderName = sender === 'user' ? '👤 You' : '🤖 Assistant';
-                messageDiv.innerHTML = `<strong>${senderName}:</strong> ${content}`;
+                addMessage('assistant', `Error: ${data.detail || 'Something went wrong'}`);
             }
-            
-            chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-            
-            return messageId;
+        } catch (err) {
+            removeMessage(loadingId);
+            addMessage('assistant', `Error: ${err.message}`);
+        } finally {
+            sendBtn.disabled  = false;
+            sendBtn.innerHTML = '↑';
+        }
+    }
+
+    function addMessage(sender, content, isLoading = false) {
+        const feed  = document.getElementById('chatMessages');
+        const wrap  = document.createElement('div');
+        const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+        wrap.id        = msgId;
+        wrap.className = `message ${sender}${isLoading ? ' loading' : ''}`;
+
+        const label  = document.createElement('div');
+        label.className = 'message-label';
+        label.textContent = sender === 'user' ? 'You' : 'Promptify';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'message-bubble';
+
+        if (isLoading) {
+            bubble.innerHTML = '<div class="spinner"></div> ' + content;
+        } else {
+            bubble.innerHTML = content;
         }
 
-        function removeMessage(messageId) {
-            const message = document.getElementById(messageId);
-            if (message) {
-                message.remove();
-            }
+        wrap.appendChild(label);
+        wrap.appendChild(bubble);
+        feed.appendChild(wrap);
+        feed.scrollTop = feed.scrollHeight;
+        return msgId;
+    }
+
+    function removeMessage(id) {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+    }
+
+    document.getElementById('promptInput').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
         }
+    });
 
-        // Handle Enter key in textarea
-        document.getElementById('promptInput').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
-        });
+    document.getElementById('promptInput').addEventListener('input', function () {
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+    });
 
-        // Auto-resize textarea
-        document.getElementById('promptInput').addEventListener('input', function() {
-            this.style.height = 'auto';
-            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-        });
-    </script>
+    document.addEventListener('DOMContentLoaded', checkAuthStatus);
+</script>
 </body>
 </html>

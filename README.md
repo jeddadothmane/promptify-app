@@ -285,6 +285,35 @@ Spotify access tokens expire after a period. Simply visit `/login` again to get 
 
 ---
 
+## 🗄️ Database
+
+Promptify uses **SQLite** to persist conversations and messages. The database file (`promptify.db`) is created automatically at the project root on first startup — no setup required.
+
+The file is excluded from git (see `.gitignore`). The schema is committed at `db/schema.sql` so you can inspect it or recreate the database manually:
+
+```bash
+sqlite3 promptify.db < db/schema.sql
+```
+
+### Schema
+
+| Table | Purpose |
+|---|---|
+| `conversations` | One row per chat thread, linked to a Spotify `user_id` |
+| `messages` | Every user and assistant message, with role and timestamp |
+
+The last **20 messages** of each conversation are sent to the LLM as context, giving it memory of the ongoing thread.
+
+### Conversation API
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/conversations/{user_id}` | List all conversations for a user |
+| `GET` | `/conversations/{id}/messages` | Load full message history |
+| `DELETE` | `/conversations/{id}?user_id=...` | Delete a conversation |
+
+---
+
 ## 🚦 Development
 
 ### Running in Development Mode

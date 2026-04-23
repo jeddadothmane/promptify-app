@@ -167,24 +167,36 @@ class OpenAIClient:
             raise Exception(f"OpenAI API error: {str(e)}")
     
     def generate_spotify_enhanced_response(self, user_prompt: str, system_message: str, spotify_data: Dict[str, Any],
-                                         tool_info: Dict[str, Any], model: str = OPENAI_MODEL, temperature: float = OPENAI_TEMPERATURE_CREATIVE) -> str:
-        """Generate a response with Spotify data context"""
-        logger.info("generate_spotify_enhanced_response | tool=%s | model=%s | temperature=%s",
-                    tool_info.get("tool"), model, temperature)
-        enhanced_prompt = f"""
-        User asked: "{user_prompt}"
-        
-        I used the {tool_info["tool"]} tool because: {tool_info.get("reasoning", "No reasoning provided")}
-        
-        Here's the Spotify data I retrieved:
-        {json.dumps(spotify_data, indent=2)}
-        
-        Please provide a helpful response based on this data, formatting it nicely for the user.
-        Please provide a valid format knowing that your response will directly integrated into a HTML file, so please keep in mind that you response is clear to an HTML return like a simple str but in HTML please.
-        Please do not return a response containing ```html```
-        """
-        
-        return self.generate_response(enhanced_prompt, system_message, model, temperature)
+                                         tool_info: Dict[str, Any], model: str = OPENAI_MODEL,
+                                         temperature: float = OPENAI_TEMPERATURE_CREATIVE,
+                                         history: List[Dict[str, str]] = None) -> str:
+        """Generate a response with Spotify data context and optional conversation history."""
+        logger.info("generate_spotify_enhanced_response | tool=%s | model=%s | history_msgs=%d",
+                    tool_info.get("tool"), model, len(history) if history else 0)
+
+        enhanced_prompt = f"""User asked: "{user_prompt}"
+
+I used the {tool_info["tool"]} tool because: {tool_info.get("reasoning", "")}
+
+Here's the Spotify data I retrieved:
+{json.dumps(spotify_data, indent=2)}
+
+Please provide a helpful response based on this data. Your response will be rendered directly in an HTML page — return valid HTML only, no markdown code fences."""
+
+        messages = [{"role": "system", "content": system_message}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": enhanced_prompt})
+
+        try:
+            completion = self.client.chat.completions.create(
+                model=model,
+                temperature=temperature,
+                messages=messages,
+            )
+            return completion.choices[0].message.content or ""
+        except Exception as e:
+            raise Exception(f"OpenAI API error: {str(e)}")
     
     @deprecated("Replaced by generate_playlist_plan which curates specific tracks instead of genre search strings.")
     def generate_playlist_search_queries(self, prompt: str, track_count: int) -> List[str]:
