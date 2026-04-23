@@ -218,11 +218,14 @@ promptify-app/
 │   │   ├── app.py                # FastAPI application
 │   │   ├── schemas.py            # Pydantic models
 │   │   └── utils.py              # Helper functions
-│   └── view/                      # HTML templates
-│       ├── index.html
-│       ├── success.html
-│       ├── error.html
-│       └── ...
+│   └── view/                      # Static files and templates
+│       ├── css/                  # Stylesheets
+│       ├── js/                   # JavaScript files
+│       └── html/                 # HTML templates
+│           ├── index.html
+│           ├── success.html
+│           ├── error.html
+│           └── ...
 ├── venv/                          # Virtual environment
 ├── .env                           # Environment variables (create this)
 ├── .gitignore

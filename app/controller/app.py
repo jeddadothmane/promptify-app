@@ -38,10 +38,10 @@ logging.config.dictConfig({
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-TEMPLATES_DIR = BASE_DIR / "view"
+TEMPLATES_DIR = BASE_DIR / "view" / "html"
 
 app = FastAPI(title="Promptify App", description="Promptify App", version="1.0.0")
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.mount("/view", StaticFiles(directory=str(BASE_DIR / "view")), name="view")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # ---- Initialize clients ----
@@ -181,8 +181,8 @@ async def spotify_callback(code: str):
 
         user_id = _get_user_id(token_info["access_token"]) or ""
         html_content = load_html_template(
-            "app/view/success.html",
-            "app/view/fallback_success.html",
+            "app/view/html/success.html",
+            "app/view/html/fallback_success.html",
             {
                 "ACCESS_TOKEN": token_info["access_token"],
                 "EXPIRES_IN": token_info["expires_in"],
@@ -197,8 +197,8 @@ async def spotify_callback(code: str):
     except Exception as e:
         logger.error("OAuth callback failed | error=%s", e)
         error_html = load_html_template(
-            "app/view/error.html",
-            "app/view/fallback_error.html",
+            "app/view/html/error.html",
+            "app/view/html/fallback_error.html",
             {"ERROR_MESSAGE": str(e)}
         )
 
@@ -209,8 +209,8 @@ async def spotify_callback(code: str):
 async def home():
     """Main UI page"""
     html_content = load_html_template(
-        "app/view/index.html",
-        "app/view/fallback_ui.html"
+        "app/view/html/index.html",
+        "app/view/html/fallback_ui.html"
     )
     
     from fastapi.responses import HTMLResponse
@@ -220,8 +220,8 @@ async def home():
 async def docs_page():
     """Documentation page with instructions"""
     html_content = load_html_template(
-        "app/view/login_success.html",
-        "app/view/fallback_ui.html"
+        "app/view/html/login_success.html",
+        "app/view/html/fallback_ui.html"
     )
     
     from fastapi.responses import HTMLResponse
