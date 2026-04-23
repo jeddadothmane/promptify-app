@@ -5,6 +5,7 @@ import json
 from typing import Dict, Any, Optional, List
 from dotenv import load_dotenv
 from app.config import OPENAI_MODEL, OPENAI_TEMPERATURE_ROUTING, OPENAI_TEMPERATURE_CREATIVE
+from app.utils import deprecated
 
 load_dotenv()
 
@@ -185,6 +186,7 @@ class OpenAIClient:
         
         return self.generate_response(enhanced_prompt, system_message, model, temperature)
     
+    @deprecated("Replaced by generate_playlist_plan which curates specific tracks instead of genre search strings.")
     def generate_playlist_search_queries(self, prompt: str, track_count: int) -> List[str]:
         """Generate optimized search queries for playlist creation using LLM"""
         try:
@@ -246,6 +248,7 @@ class OpenAIClient:
             print(f"LLM search query generation failed: {e}")
             return self._fallback_search_queries(prompt)
     
+    @deprecated("Was the fallback for generate_individual_track_searches, which was replaced by generate_playlist_plan.")
     def _fallback_individual_searches(self, prompt: str, track_count: int) -> List[str]:
         """Fallback method to generate individual search queries when LLM fails"""
         import re
@@ -295,6 +298,7 @@ class OpenAIClient:
         
         return unique_queries[:track_count]
     
+    @deprecated("Only called by generate_playlist_search_queries, which is itself deprecated.")
     def _fallback_search_queries(self, prompt: str) -> List[str]:
         """Fallback method to generate search queries when LLM fails"""
         import re
