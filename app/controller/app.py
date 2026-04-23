@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from spotipy import Spotify
 from .schemas import AskRequest, AskResponse, ConversationOut, MessageOut
@@ -40,6 +41,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = BASE_DIR / "view"
 
 app = FastAPI(title="Promptify App", description="Promptify App", version="1.0.0")
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # ---- Initialize clients ----

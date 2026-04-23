@@ -1,0 +1,39 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+    --green:          #1db954;
+    --green-dim:      #17a349;
+    --purple:         #764ba2;
+    --purple-dim:     #5a3880;
+    --bg:             #0d0d0d;
+    --sidebar-bg:     #111111;
+    --chat-bg:        #161616;
+    --border:         #2a2a2a;
+    --text:           #e8e8e8;
+    --text-muted:     #888;
+    --user-bubble:    #764ba2;
+    --assist-bubble:  #1e1e1e;
+}
+
+html, body {
+    height: 100%;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+}
+
+.app {
+    display: flex;
+    height: 100vh;
+}
+
+.divider {
+    height: 1px;
+    background: var(--border);
+}
+
+@media (max-width: 680px) {
+    .app { flex-direction: column; }
+    .chat-panel { min-height: 0; }
+}
