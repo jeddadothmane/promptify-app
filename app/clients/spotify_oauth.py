@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from typing import Dict, Any, List
+from spotipy import Spotify
 from spotipy.oauth2 import SpotifyOAuth
 import os
 import json
@@ -8,8 +9,9 @@ import json
 logger = logging.getLogger(__name__)
 
 
-class SpotifyMCPTools:
-    """Spotify OAuth and tool-metadata helpers (tool execution is handled by the MCP server)"""
+class SpotifyClient:
+    """Handles Spotify OAuth flow and exposes tool definitions for LLM tool selection.
+    Actual tool execution is handled by the MCP server (app/mcp_server/server.py)."""
 
     def __init__(self):
         self.client_id = os.getenv("SPOTIFY_CLIENT_ID")
@@ -31,7 +33,6 @@ class SpotifyMCPTools:
     def authenticate(self, access_token: str = None):
         """Authenticate with Spotify using an access token"""
         if access_token:
-            from spotipy import Spotify
             self.access_token = access_token
             self.sp = Spotify(auth=access_token)
             return True
@@ -46,7 +47,7 @@ class SpotifyMCPTools:
         return self.sp_oauth.get_access_token(code)
 
     def get_available_tools(self) -> List[Dict[str, Any]]:
-        """Get the list of available Spotify tools (used for OpenAI tool selection)"""
+        """Load tool definitions from JSON (used to inform OpenAI which tools exist)"""
         try:
             with open(self.data_file, "r", encoding="utf-8") as f:
                 tools = json.load(f)

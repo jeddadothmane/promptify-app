@@ -37,7 +37,7 @@ async def execute_spotify_tool(tool_name: str, parameters: Dict[str, Any], acces
     project_root = Path(__file__).resolve().parents[2]
     server_params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "app.mcp_server.spotify_server"],
+        args=["-m", "app.mcp_server.server"],
         env={
             "SPOTIFY_ACCESS_TOKEN": access_token,
             "SPOTIFY_CLIENT_ID": os.environ.get("SPOTIFY_CLIENT_ID", ""),

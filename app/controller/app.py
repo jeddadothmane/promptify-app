@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 from spotipy import Spotify
 from .schemas import AskRequest, AskResponse, ConversationOut, MessageOut
 from dotenv import load_dotenv
-from app.clients.spotify_mcp import SpotifyMCPTools
+from app.clients.spotify_oauth import SpotifyClient
 from app.clients.open_ai_client import OpenAIClient
 from app.database import init_db
 from app import repositories
@@ -46,7 +46,7 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # ---- Initialize clients ----
 openai_client = OpenAIClient()
-spotify_tools = SpotifyMCPTools()
+spotify_tools = SpotifyClient()
 
 
 @app.on_event("startup")
