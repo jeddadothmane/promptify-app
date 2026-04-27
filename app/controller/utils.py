@@ -49,13 +49,18 @@ async def execute_spotify_tool(tool_name: str, parameters: Dict[str, Any], acces
         cwd=str(project_root),
     )
     try:
+        # Strip None values so MCP uses each tool's declared parameter defaults
+        clean_params = {k: v for k, v in parameters.items() if v is not None}
+
         async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                result = await session.call_tool(tool_name, arguments=parameters)
+                result = await session.call_tool(tool_name, arguments=clean_params)
 
         if result.isError:
-            return {"error": f"MCP tool {tool_name} returned an error"}
+            error_text = result.content[0].text if result.content and hasattr(result.content[0], "text") else "unknown error"
+            logger.error("execute_spotify_tool | tool=%s | MCP error: %s", tool_name, error_text)
+            return {"error": error_text}
         if result.content and hasattr(result.content[0], "text"):
             return json.loads(result.content[0].text)
         return {"error": "Empty tool result"}
