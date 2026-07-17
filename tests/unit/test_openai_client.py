@@ -1,6 +1,6 @@
 import json
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 
 @pytest.fixture()
@@ -12,142 +12,173 @@ def client():
         return c
 
 
-# ── fallback_keyword_detection ────────────────────────────────────────────────
+# ── _spotify_tools_to_openai_schema ───────────────────────────────────────────
 
-class TestFallbackKeywordDetection:
-    def test_top_artists(self, client):
-        result = client.fallback_keyword_detection("Show me my top artists")
-        assert result["tool"] == "get_top_artists"
+class TestSpotifyToolsToOpenAISchema:
+    def test_required_param_has_no_default(self, client):
+        schema = client._spotify_tools_to_openai_schema([
+            {"name": "search_tracks", "description": "Search for tracks",
+             "parameters": {"query": {"type": "string", "description": "Search query"}}}
+        ])
+        fn = schema[0]["function"]
+        assert fn["name"] == "search_tracks"
+        assert fn["parameters"]["required"] == ["query"]
+        assert fn["parameters"]["properties"]["query"]["type"] == "string"
 
-    def test_top_artists_limit_extracted(self, client):
-        result = client.fallback_keyword_detection("Who are my top 10 favorite artists?")
-        assert result["tool"] == "get_top_artists"
-        assert result["parameters"]["limit"] == 10
+    def test_param_with_default_is_not_required(self, client):
+        schema = client._spotify_tools_to_openai_schema([
+            {"name": "get_top_artists", "description": "Get top artists",
+             "parameters": {"limit": {"type": "integer", "default": 5, "description": "count"}}}
+        ])
+        assert schema[0]["function"]["parameters"]["required"] == []
 
-    def test_top_tracks(self, client):
-        result = client.fallback_keyword_detection("Show my top tracks")
-        assert result["tool"] == "get_top_tracks"
-
-    def test_recently_played(self, client):
-        result = client.fallback_keyword_detection("What did I recently played?")
-        assert result["tool"] == "get_recently_played"
-
-    def test_current_playback(self, client):
-        result = client.fallback_keyword_detection("What's playing right now?")
-        assert result["tool"] == "get_current_playback"
-        assert result["parameters"] == {}
-
-    def test_create_playlist(self, client):
-        prompt = "Create a playlist for me"
-        result = client.fallback_keyword_detection(prompt)
-        assert result["tool"] == "create_playlist_from_prompt"
-        assert result["parameters"]["prompt"] == prompt
-
-    def test_get_user_playlists(self, client):
-        result = client.fallback_keyword_detection("Show my playlists")
-        assert result["tool"] == "get_user_playlists"
-
-    def test_search_tracks(self, client):
-        result = client.fallback_keyword_detection("Search for Radiohead")
-        assert result["tool"] == "search_tracks"
-
-    def test_no_match_returns_none(self, client):
-        result = client.fallback_keyword_detection("What is the capital of France?")
-        assert result["tool"] is None
+    def test_no_params_tool(self, client):
+        schema = client._spotify_tools_to_openai_schema([
+            {"name": "get_current_playback", "description": "Current playback", "parameters": {}}
+        ])
+        assert schema[0]["function"]["parameters"]["properties"] == {}
+        assert schema[0]["function"]["parameters"]["required"] == []
 
 
-# ── _fallback_full_analysis ───────────────────────────────────────────────────
+# ── run_agentic_loop ───────────────────────────────────────────────────────────
 
-class TestFallbackFullAnalysis:
-    def test_non_spotify_prompt(self, client):
-        result = client._fallback_full_analysis("What is 2 + 2?")
-        assert result["requires_spotify"] is False
-        assert result["tool"] is None
-
-    def test_spotify_prompt_delegates_to_keyword(self, client):
-        result = client._fallback_full_analysis("Show my top artists")
-        assert result["requires_spotify"] is True
-        assert result["tool"] == "get_top_artists"
+def _completion_with_content(content: str):
+    response_mock = MagicMock()
+    response_mock.choices[0].message.content = content
+    response_mock.choices[0].message.tool_calls = None
+    return response_mock
 
 
-# ── analyze_prompt ────────────────────────────────────────────────────────────
+def _completion_with_tool_call(tool_call_id: str, name: str, arguments: dict):
+    tool_call = MagicMock()
+    tool_call.id = tool_call_id
+    tool_call.function.name = name
+    tool_call.function.arguments = json.dumps(arguments)
 
-class TestAnalyzePrompt:
-    def _mock_completion(self, client, payload: dict):
-        response_mock = MagicMock()
-        response_mock.choices[0].message.content = json.dumps(payload)
-        client.client.chat.completions.create.return_value = response_mock
+    response_mock = MagicMock()
+    response_mock.choices[0].message.content = None
+    response_mock.choices[0].message.tool_calls = [tool_call]
+    return response_mock
 
+
+class TestRunAgenticLoop:
     @pytest.mark.asyncio
-    async def test_happy_path(self, client):
-        self._mock_completion(client, {
-            "requires_spotify": True,
-            "tool": "get_top_tracks",
-            "parameters": {"limit": 5},
-            "reasoning": "user wants top tracks",
-        })
-        result = await client.analyze_prompt("my top tracks", [])
-        assert result["requires_spotify"] is True
-        assert result["tool"] == "get_top_tracks"
+    async def test_answers_directly_without_calling_any_tool(self, client):
+        client.client.chat.completions.create.return_value = _completion_with_content("The capital of France is Paris.")
+        execute_tool = AsyncMock()
 
-    @pytest.mark.asyncio
-    async def test_strips_markdown_fences(self, client):
-        raw = "```json\n" + json.dumps({
-            "requires_spotify": True,
-            "tool": "get_current_playback",
-            "parameters": {},
-            "reasoning": "playback",
-        }) + "\n```"
-        response_mock = MagicMock()
-        response_mock.choices[0].message.content = raw
-        client.client.chat.completions.create.return_value = response_mock
-
-        result = await client.analyze_prompt("what's playing", [])
-        assert result["tool"] == "get_current_playback"
-
-    @pytest.mark.asyncio
-    async def test_falls_back_on_invalid_json(self, client):
-        response_mock = MagicMock()
-        response_mock.choices[0].message.content = "not json at all"
-        client.client.chat.completions.create.return_value = response_mock
-
-        result = await client.analyze_prompt("Show my top artists", [])
-        # Fallback should still return a coherent structure
-        assert "requires_spotify" in result
-
-    @pytest.mark.asyncio
-    async def test_falls_back_on_api_exception(self, client):
-        client.client.chat.completions.create.side_effect = Exception("network error")
-        result = await client.analyze_prompt("my top artists", [])
-        assert "requires_spotify" in result
-
-
-# ── generate_spotify_enhanced_response ───────────────────────────────────────
-
-class TestGenerateSpotifyEnhancedResponse:
-    def test_returns_raw_html(self, client):
-        response_mock = MagicMock()
-        response_mock.choices[0].message.content = "<ul><li>Artist 1</li></ul>"
-        client.client.chat.completions.create.return_value = response_mock
-
-        result = client.generate_spotify_enhanced_response(
-            user_prompt="my top artists",
+        result = await client.run_agentic_loop(
+            prompt="What is the capital of France?",
+            available_tools=[],
+            execute_tool=execute_tool,
             system_message="You are a helpful assistant.",
-            spotify_data={"artists": [{"name": "Artist 1"}]},
-            tool_info={"tool": "get_top_artists", "reasoning": "keyword"},
         )
-        assert "<ul>" in result
-        assert "```" not in result
 
-    def test_raises_on_api_error(self, client):
-        client.client.chat.completions.create.side_effect = Exception("openai down")
-        with pytest.raises(Exception, match="OpenAI API error"):
-            client.generate_spotify_enhanced_response(
-                user_prompt="x",
-                system_message="y",
-                spotify_data={},
-                tool_info={"tool": "get_top_artists", "reasoning": ""},
-            )
+        assert result["answer"] == "The capital of France is Paris."
+        assert result["tool_calls"] == []
+        execute_tool.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_single_tool_call_then_final_answer(self, client):
+        client.client.chat.completions.create.side_effect = [
+            _completion_with_tool_call("call_1", "get_top_artists", {"limit": 5}),
+            _completion_with_content("<p>Your top artist is Radiohead.</p>"),
+        ]
+        execute_tool = AsyncMock(return_value={"artists": [{"name": "Radiohead"}]})
+
+        result = await client.run_agentic_loop(
+            prompt="Who are my top artists?",
+            available_tools=[{"name": "get_top_artists", "description": "", "parameters": {}}],
+            execute_tool=execute_tool,
+            system_message="You are a helpful assistant.",
+        )
+
+        assert "Radiohead" in result["answer"]
+        assert len(result["tool_calls"]) == 1
+        assert result["tool_calls"][0]["tool"] == "get_top_artists"
+        execute_tool.assert_awaited_once_with("get_top_artists", {"limit": 5})
+
+    @pytest.mark.asyncio
+    async def test_chains_multiple_tool_calls_across_turns(self, client):
+        client.client.chat.completions.create.side_effect = [
+            _completion_with_tool_call("call_1", "get_current_playback", {}),
+            _completion_with_tool_call("call_2", "get_top_artists", {"limit": 5}),
+            _completion_with_content("<p>Yes, that's one of your top artists.</p>"),
+        ]
+        execute_tool = AsyncMock(side_effect=[
+            {"track": "Karma Police", "artist": "Radiohead"},
+            {"artists": [{"name": "Radiohead"}]},
+        ])
+
+        result = await client.run_agentic_loop(
+            prompt="Is what's playing one of my top artists?",
+            available_tools=[
+                {"name": "get_current_playback", "description": "", "parameters": {}},
+                {"name": "get_top_artists", "description": "", "parameters": {}},
+            ],
+            execute_tool=execute_tool,
+            system_message="You are a helpful assistant.",
+        )
+
+        assert len(result["tool_calls"]) == 2
+        assert [c["tool"] for c in result["tool_calls"]] == ["get_current_playback", "get_top_artists"]
+        assert execute_tool.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_multiple_tool_calls_in_a_single_turn(self, client):
+        tool_call_1 = MagicMock()
+        tool_call_1.id = "call_1"
+        tool_call_1.function.name = "get_top_artists"
+        tool_call_1.function.arguments = json.dumps({"limit": 5})
+
+        tool_call_2 = MagicMock()
+        tool_call_2.id = "call_2"
+        tool_call_2.function.name = "get_top_tracks"
+        tool_call_2.function.arguments = json.dumps({"limit": 5})
+
+        first_response = MagicMock()
+        first_response.choices[0].message.content = None
+        first_response.choices[0].message.tool_calls = [tool_call_1, tool_call_2]
+
+        client.client.chat.completions.create.side_effect = [
+            first_response,
+            _completion_with_content("<p>Here's both.</p>"),
+        ]
+        execute_tool = AsyncMock(side_effect=[
+            {"artists": [{"name": "Radiohead"}]},
+            {"tracks": [{"name": "Karma Police"}]},
+        ])
+
+        result = await client.run_agentic_loop(
+            prompt="Give me my top artists and tracks",
+            available_tools=[],
+            execute_tool=execute_tool,
+            system_message="You are a helpful assistant.",
+        )
+
+        assert len(result["tool_calls"]) == 2
+        assert execute_tool.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_stops_after_max_iterations_and_forces_final_answer(self, client):
+        looping_response = _completion_with_tool_call("call_1", "search_tracks", {"query": "test"})
+        client.client.chat.completions.create.side_effect = [
+            looping_response, looping_response, looping_response,
+            _completion_with_content("<p>Giving up gracefully.</p>"),
+        ]
+        execute_tool = AsyncMock(return_value={"tracks": []})
+
+        result = await client.run_agentic_loop(
+            prompt="find me something",
+            available_tools=[{"name": "search_tracks", "description": "", "parameters": {}}],
+            execute_tool=execute_tool,
+            system_message="You are a helpful assistant.",
+            max_iterations=3,
+        )
+
+        assert result["answer"] == "<p>Giving up gracefully.</p>"
+        assert execute_tool.await_count == 3
+        assert client.client.chat.completions.create.call_count == 4
 
 
 # ── generate_playlist_plan ────────────────────────────────────────────────────

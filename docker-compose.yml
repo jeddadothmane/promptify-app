@@ -1,0 +1,10 @@
+services:
+  promptify:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./promptify.db:/promptify/promptify.db
+    restart: unless-stopped

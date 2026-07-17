@@ -3,15 +3,6 @@ import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 
 
-def _make_analysis(requires_spotify=True, tool="get_top_artists", parameters=None):
-    return {
-        "requires_spotify": requires_spotify,
-        "tool": tool,
-        "parameters": parameters or {"limit": 5},
-        "reasoning": "test",
-    }
-
-
 @pytest.fixture()
 def app_client(in_memory_db):
     """
@@ -37,13 +28,16 @@ def app_client(in_memory_db):
             yield c, mock_tool, openai_client
 
 
+def _mock_loop_result(answer="<p>ok</p>", tool_calls=None):
+    return {"answer": answer, "tool_calls": tool_calls or []}
+
+
 # ── happy path ────────────────────────────────────────────────────────────────
 
 class TestAskHappyPath:
     def test_returns_html_answer(self, app_client):
         tc, mock_tool, oa = app_client
-        oa.analyze_prompt = AsyncMock(return_value=_make_analysis())
-        oa.generate_spotify_enhanced_response = MagicMock(return_value="<p>Top artists</p>")
+        oa.run_agentic_loop = AsyncMock(return_value=_mock_loop_result("<p>Top artists</p>"))
 
         resp = tc.post("/ask", json={
             "prompt": "Who are my top artists?",
@@ -54,54 +48,82 @@ class TestAskHappyPath:
         assert "<p>Top artists</p>" in data["answer"]
         assert data["conversation_id"] is not None
 
-    def test_executes_correct_tool(self, app_client):
+    def test_run_agentic_loop_invoked_once_per_request(self, app_client):
         tc, mock_tool, oa = app_client
-        oa.analyze_prompt = AsyncMock(return_value=_make_analysis(tool="get_top_tracks"))
-        oa.generate_spotify_enhanced_response = MagicMock(return_value="<p>Tracks</p>")
+        oa.run_agentic_loop = AsyncMock(return_value=_mock_loop_result())
 
         tc.post("/ask", json={
             "prompt": "What are my top tracks?",
             "spotify_access_token": "tok",
         })
-        called_tool = mock_tool.call_args[0][0]
-        assert called_tool == "get_top_tracks"
+        assert oa.run_agentic_loop.call_count == 1
+
+    def test_multi_tool_calls_are_surfaced(self, app_client):
+        """The agentic loop can chain several tool calls before answering — verify
+        that a multi-call result still flows through to the final answer untouched."""
+        tc, mock_tool, oa = app_client
+        oa.run_agentic_loop = AsyncMock(return_value=_mock_loop_result(
+            "<p>You're listening to Radiohead, one of your top artists.</p>",
+            tool_calls=[
+                {"tool": "get_current_playback", "parameters": {}, "result": {"track": "Karma Police"}},
+                {"tool": "get_top_artists", "parameters": {"limit": 5}, "result": {"artists": ["Radiohead"]}},
+            ],
+        ))
+
+        resp = tc.post("/ask", json={
+            "prompt": "Is what I'm playing now one of my top artists?",
+            "spotify_access_token": "tok",
+        })
+        assert resp.status_code == 200
+        assert "Radiohead" in resp.json()["answer"]
 
 
-# ── non-Spotify prompt ────────────────────────────────────────────────────────
+# ── non-Spotify / general prompts ─────────────────────────────────────────────
 
 class TestAskNonSpotify:
-    def test_returns_guidance_message(self, app_client):
+    def test_model_answers_directly_without_calling_tools(self, app_client):
+        """When no tool call is needed, the model just answers — no canned guidance message."""
         tc, mock_tool, oa = app_client
-        oa.analyze_prompt = AsyncMock(return_value=_make_analysis(requires_spotify=False, tool=None))
+        oa.run_agentic_loop = AsyncMock(return_value=_mock_loop_result("<p>2 + 2 = 4</p>"))
 
         resp = tc.post("/ask", json={"prompt": "What is 2 + 2?"})
         assert resp.status_code == 200
-        assert "Spotify" in resp.json()["answer"]
+        assert "4" in resp.json()["answer"]
         mock_tool.assert_not_called()
 
 
 # ── missing access token ──────────────────────────────────────────────────────
 
 class TestAskMissingToken:
-    def test_prompts_user_to_authenticate(self, app_client):
+    def test_no_tools_offered_without_token(self, app_client):
         tc, mock_tool, oa = app_client
-        oa.analyze_prompt = AsyncMock(return_value=_make_analysis())
+        oa.run_agentic_loop = AsyncMock(
+            return_value=_mock_loop_result("<p>Please authenticate via /login first.</p>")
+        )
 
         with patch("app.controller.app._get_user_id", return_value=None):
             resp = tc.post("/ask", json={"prompt": "Show my top artists"})
 
         assert resp.status_code == 200
-        assert "access token" in resp.json()["answer"].lower()
+        assert "login" in resp.json()["answer"].lower()
         mock_tool.assert_not_called()
+
+        called_kwargs = oa.run_agentic_loop.call_args.kwargs
+        assert called_kwargs["available_tools"] == []
 
 
 # ── Spotify tool error ────────────────────────────────────────────────────────
 
 class TestAskToolError:
-    def test_returns_error_message(self, app_client):
+    def test_error_is_incorporated_into_final_answer(self, app_client):
+        """Tool errors are fed back into the loop as a tool message; the model
+        explains the failure itself rather than the endpoint short-circuiting."""
         tc, mock_tool, oa = app_client
-        oa.analyze_prompt = AsyncMock(return_value=_make_analysis())
-        mock_tool.return_value = {"error": "Spotify API is unavailable"}
+        oa.run_agentic_loop = AsyncMock(return_value=_mock_loop_result(
+            "<p>Sorry, there was an error reaching Spotify: Spotify API is unavailable.</p>",
+            tool_calls=[{"tool": "get_top_artists", "parameters": {"limit": 5},
+                         "result": {"error": "Spotify API is unavailable"}}],
+        ))
 
         resp = tc.post("/ask", json={
             "prompt": "Top artists please",
@@ -111,28 +133,12 @@ class TestAskToolError:
         assert "error" in resp.json()["answer"].lower()
 
 
-# ── no tool resolved ──────────────────────────────────────────────────────────
-
-class TestAskNoTool:
-    def test_returns_clarification_message(self, app_client):
-        tc, mock_tool, oa = app_client
-        oa.analyze_prompt = AsyncMock(return_value=_make_analysis(tool=None))
-
-        resp = tc.post("/ask", json={
-            "prompt": "Do something with music",
-            "spotify_access_token": "tok",
-        })
-        assert resp.status_code == 200
-        assert mock_tool.call_count == 0
-
-
 # ── conversation persistence ──────────────────────────────────────────────────
 
 class TestAskConversationPersistence:
     def test_same_conversation_id_reused(self, app_client, in_memory_db):
         tc, mock_tool, oa = app_client
-        oa.analyze_prompt = AsyncMock(return_value=_make_analysis())
-        oa.generate_spotify_enhanced_response = MagicMock(return_value="<p>ok</p>")
+        oa.run_agentic_loop = AsyncMock(return_value=_mock_loop_result("<p>ok</p>"))
 
         r1 = tc.post("/ask", json={"prompt": "Top artists", "spotify_access_token": "tok"})
         conv_id = r1.json()["conversation_id"]

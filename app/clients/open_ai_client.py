@@ -2,7 +2,7 @@ import logging
 from openai import OpenAI
 import os
 import json
-from typing import Dict, Any, Optional, List
+from typing import Awaitable, Callable, Dict, Any, Optional, List
 from dotenv import load_dotenv
 from app.config import OPENAI_MODEL, OPENAI_TEMPERATURE_ROUTING, OPENAI_TEMPERATURE_CREATIVE
 from app.utils import deprecated
@@ -13,144 +13,113 @@ logger = logging.getLogger(__name__)
 
 class OpenAIClient:
     """OpenAI client wrapper with Spotify tool detection and response generation"""
-    
+
     def __init__(self):
         self.client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    
-    async def analyze_prompt(self, prompt: str, available_tools: list) -> Dict[str, Any]:
-        """Single LLM call: detect Spotify intent and select the right tool + parameters."""
 
-        analysis_prompt = f"""
-        You are an AI assistant for a Spotify app. Analyze the user's message and decide two things:
-        1. Does this request require Spotify data? (yes/no)
-        2. If yes, which tool should be used and with what parameters?
-
-        User message: "{prompt}"
-
-        Available Spotify tools:
-        {json.dumps(available_tools, indent=2)}
-
-        Rules:
-        - Set "requires_spotify" to true only if the user is asking about music, their Spotify data, playback, playlists, artists, tracks, or wants a playlist created.
-        - If "requires_spotify" is false, set "tool" to null and "parameters" to {{}}.
-        - Extract any numbers mentioned for limits (e.g. "top 5" → limit=5).
-        - For playlist creation requests, always pass the full original prompt as the "prompt" parameter.
-
-        Examples:
-        - "What are my top 5 artists?" → requires_spotify=true, tool=get_top_artists, limit=5
-        - "What's currently playing?" → requires_spotify=true, tool=get_current_playback
-        - "Find songs by Taylor Swift" → requires_spotify=true, tool=search_tracks, query="Taylor Swift"
-        - "Create a workout playlist with 20 songs" → requires_spotify=true, tool=create_playlist_from_prompt, prompt="Create a workout playlist with 20 songs"
-        - "What is the capital of France?" → requires_spotify=false
-
-        Respond with ONLY a JSON object in this exact format:
-        {{
-            "requires_spotify": true or false,
-            "tool": "tool_name or null",
-            "parameters": {{"param1": "value1"}},
-            "reasoning": "one sentence explanation"
-        }}
-        """
-
-        logger.info("analyze_prompt | prompt=%r | model=%s | temperature=%s", prompt, OPENAI_MODEL, OPENAI_TEMPERATURE_ROUTING)
-        try:
-            completion = self.client.chat.completions.create(
-                model=OPENAI_MODEL,
-                temperature=OPENAI_TEMPERATURE_ROUTING,
-                messages=[
-                    {"role": "system", "content": "You are a Spotify assistant routing expert. Always respond with valid JSON only."},
-                    {"role": "user", "content": analysis_prompt}
-                ],
-            )
-
-            response_text = completion.choices[0].message.content.strip()
-
-            if response_text.startswith("```"):
-                lines = response_text.split('\n')
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]
-                response_text = '\n'.join(lines).strip()
-
-            try:
-                result = json.loads(response_text)
-                parsed = {
-                    "requires_spotify": bool(result.get("requires_spotify", False)),
-                    "tool": result.get("tool") or None,
-                    "parameters": result.get("parameters", {}),
-                    "reasoning": result.get("reasoning", "")
+    @staticmethod
+    def _spotify_tools_to_openai_schema(available_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert spotify_tools.json's param format into OpenAI function-calling tool schemas."""
+        schema = []
+        for tool in available_tools:
+            properties = {}
+            required = []
+            for param_name, param_info in tool.get("parameters", {}).items():
+                properties[param_name] = {
+                    "type": param_info.get("type", "string"),
+                    "description": param_info.get("description", ""),
                 }
-                logger.info("analyze_prompt result | requires_spotify=%s | tool=%s | reasoning=%r",
-                            parsed["requires_spotify"], parsed["tool"], parsed["reasoning"])
-                return parsed
-            except json.JSONDecodeError:
-                logger.warning("analyze_prompt | LLM returned invalid JSON, falling back to keyword detection")
-                return self._fallback_full_analysis(prompt)
+                if "default" not in param_info:
+                    required.append(param_name)
+            schema.append({
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool.get("description", ""),
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                },
+            })
+        return schema
 
-        except Exception as e:
-            logger.error("analyze_prompt | LLM call failed: %s — falling back to keyword detection", e)
-            return self._fallback_full_analysis(prompt)
+    async def run_agentic_loop(
+        self,
+        prompt: str,
+        available_tools: List[Dict[str, Any]],
+        execute_tool: Callable[[str, Dict[str, Any]], Awaitable[Dict[str, Any]]],
+        system_message: str,
+        model: str = OPENAI_MODEL,
+        temperature: float = OPENAI_TEMPERATURE_ROUTING,
+        history: Optional[List[Dict[str, str]]] = None,
+        max_iterations: int = 5,
+    ) -> Dict[str, Any]:
+        """Agentic tool-calling loop: the model can call zero, one, or several Spotify
+        tools — across multiple turns — before producing its final answer."""
+        tools = self._spotify_tools_to_openai_schema(available_tools) if available_tools else None
 
-    def _fallback_full_analysis(self, prompt: str) -> Dict[str, Any]:
-        """Fallback when the combined LLM call fails: keyword intent check + keyword tool selection."""
-        prompt_lower = prompt.lower()
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": system_message}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": prompt})
 
-        spotify_keywords = [
-            "top artists", "top tracks", "favorite artists", "favorite songs",
-            "recently played", "current song", "what's playing", "playlist",
-            "spotify", "music", "song", "artist", "album", "play"
-        ]
-        requires_spotify = any(kw in prompt_lower for kw in spotify_keywords)
+        tool_calls_made: List[Dict[str, Any]] = []
 
-        if not requires_spotify:
-            return {"requires_spotify": False, "tool": None, "parameters": {}, "reasoning": "No Spotify keywords found"}
+        for iteration in range(max_iterations):
+            completion = self.client.chat.completions.create(
+                model=model,
+                temperature=temperature,
+                messages=messages,
+                tools=tools,
+            )
+            message = completion.choices[0].message
 
-        tool_info = self.fallback_keyword_detection(prompt)
+            if not message.tool_calls:
+                return {"answer": (message.content or "").strip(), "tool_calls": tool_calls_made}
+
+            messages.append({
+                "role": "assistant",
+                "content": message.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    }
+                    for tc in message.tool_calls
+                ],
+            })
+
+            for tool_call in message.tool_calls:
+                tool_name = tool_call.function.name
+                try:
+                    parameters = json.loads(tool_call.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    parameters = {}
+
+                logger.info("run_agentic_loop | iteration=%d | tool=%s | parameters=%s", iteration, tool_name, parameters)
+                result = await execute_tool(tool_name, parameters)
+                tool_calls_made.append({"tool": tool_name, "parameters": parameters, "result": result})
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(result),
+                })
+
+        logger.warning("run_agentic_loop | hit max_iterations=%d, forcing final answer", max_iterations)
+        final_completion = self.client.chat.completions.create(
+            model=model,
+            temperature=temperature,
+            messages=messages,
+        )
         return {
-            "requires_spotify": True,
-            "tool": tool_info["tool"],
-            "parameters": tool_info["parameters"],
-            "reasoning": tool_info["reasoning"]
+            "answer": (final_completion.choices[0].message.content or "").strip(),
+            "tool_calls": tool_calls_made,
         }
-    
-    def fallback_keyword_detection(self, prompt: str) -> Dict[str, Any]:
-        """Fallback keyword-based tool detection if LLM fails"""
-        import re
-        prompt_lower = prompt.lower()
-        
-        if any(phrase in prompt_lower for phrase in ["top artists", "favorite artists", "most played artists"]):
-            numbers = re.findall(r'\d+', prompt)
-            limit = int(numbers[0]) if numbers else 5
-            return {"tool": "get_top_artists", "parameters": {"limit": limit}, "reasoning": "Keyword detection: top artists"}
-        
-        elif any(phrase in prompt_lower for phrase in ["top tracks", "favorite songs", "most played songs"]):
-            numbers = re.findall(r'\d+', prompt)
-            limit = int(numbers[0]) if numbers else 5
-            return {"tool": "get_top_tracks", "parameters": {"limit": limit}, "reasoning": "Keyword detection: top tracks"}
-        
-        elif any(phrase in prompt_lower for phrase in ["recently played", "recent songs", "last played"]):
-            numbers = re.findall(r'\d+', prompt)
-            limit = int(numbers[0]) if numbers else 20
-            return {"tool": "get_recently_played", "parameters": {"limit": limit}, "reasoning": "Keyword detection: recently played"}
-        
-        elif any(phrase in prompt_lower for phrase in ["current song", "what's playing", "now playing", "current track"]):
-            return {"tool": "get_current_playback", "parameters": {}, "reasoning": "Keyword detection: current playback"}
-        
-        elif any(phrase in prompt_lower for phrase in ["make me a playlist", "create a playlist", "generate a playlist", "build a playlist"]):
-            return {"tool": "create_playlist_from_prompt", "parameters": {"prompt": prompt}, "reasoning": "Keyword detection: playlist creation"}
-        
-        elif any(phrase in prompt_lower for phrase in ["playlist", "playlists"]) and not any(phrase in prompt_lower for phrase in ["make", "create", "generate", "build"]):
-            numbers = re.findall(r'\d+', prompt)
-            limit = int(numbers[0]) if numbers else 20
-            return {"tool": "get_user_playlists", "parameters": {"limit": limit}, "reasoning": "Keyword detection: existing playlists"}
-        
-        elif "search" in prompt_lower:
-            search_query = prompt_lower.replace("search", "").replace("for", "").strip()
-            return {"tool": "search_tracks", "parameters": {"query": search_query}, "reasoning": "Keyword detection: search"}
-        
-        return {"tool": None, "parameters": {}, "reasoning": "No matching tool found"}
-    
+
     def generate_response(self, prompt: str, system_message: str, model: str = OPENAI_MODEL, temperature: float = OPENAI_TEMPERATURE_CREATIVE) -> str:
         """Generate a response using OpenAI"""
         try:
@@ -161,38 +130,6 @@ class OpenAIClient:
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": prompt},
                 ],
-            )
-            return completion.choices[0].message.content or ""
-        except Exception as e:
-            raise Exception(f"OpenAI API error: {str(e)}")
-    
-    def generate_spotify_enhanced_response(self, user_prompt: str, system_message: str, spotify_data: Dict[str, Any],
-                                         tool_info: Dict[str, Any], model: str = OPENAI_MODEL,
-                                         temperature: float = OPENAI_TEMPERATURE_CREATIVE,
-                                         history: List[Dict[str, str]] = None) -> str:
-        """Generate a response with Spotify data context and optional conversation history."""
-        logger.info("generate_spotify_enhanced_response | tool=%s | model=%s | history_msgs=%d",
-                    tool_info.get("tool"), model, len(history) if history else 0)
-
-        enhanced_prompt = f"""User asked: "{user_prompt}"
-
-I used the {tool_info["tool"]} tool because: {tool_info.get("reasoning", "")}
-
-Here's the Spotify data I retrieved:
-{json.dumps(spotify_data, indent=2)}
-
-Please provide a helpful response based on this data. Your response will be rendered directly in an HTML page — return valid HTML only, no markdown code fences."""
-
-        messages = [{"role": "system", "content": system_message}]
-        if history:
-            messages.extend(history)
-        messages.append({"role": "user", "content": enhanced_prompt})
-
-        try:
-            completion = self.client.chat.completions.create(
-                model=model,
-                temperature=temperature,
-                messages=messages,
             )
             return completion.choices[0].message.content or ""
         except Exception as e:

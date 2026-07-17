@@ -2,7 +2,7 @@ import sqlite3
 import tempfile
 import os
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
 
 _SCHEMA = """
@@ -64,13 +64,9 @@ def client(in_memory_db):
         patch("app.controller.app.execute_spotify_tool"),
         patch("app.database.init_db"),
     ):
-        MockOpenAI.return_value.analyze_prompt.return_value = {
-            "requires_spotify": True,
-            "tool": "get_top_artists",
-            "parameters": {"limit": 5},
-            "reasoning": "top artists request",
-        }
-        MockOpenAI.return_value.generate_spotify_enhanced_response.return_value = "<p>Your top artists</p>"
+        MockOpenAI.return_value.run_agentic_loop = AsyncMock(
+            return_value={"answer": "<p>Your top artists</p>", "tool_calls": []}
+        )
         MockOpenAI.return_value.get_available_tools = lambda: []
         MockSpotify.return_value.get_available_tools.return_value = []
         MockSpotify.return_value.get_auth_url.return_value = "https://accounts.spotify.com/authorize?..."

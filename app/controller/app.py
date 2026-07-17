@@ -82,56 +82,38 @@ async def ask(body: AskRequest):
             history = [{"role": m["role"], "content": m["content"]} for m in raw]
             logger.info("Loaded %d history messages | conversation=%s", len(history), conversation_id)
 
-        # ── Prompt analysis ───────────────────────────────────────
-        available_tools = spotify_tools.get_available_tools()
-        analysis = await openai_client.analyze_prompt(body.prompt, available_tools)
-        logger.info("Prompt analysis | requires_spotify=%s | tool=%s | reasoning=%r",
-                    analysis["requires_spotify"], analysis["tool"], analysis["reasoning"])
+        # ── Agentic tool-calling ────────────────────────────────────
+        # The model decides itself whether Spotify data is needed, which tool(s)
+        # to call, and can chain multiple tool calls before answering.
+        available_tools = spotify_tools.get_available_tools() if body.spotify_access_token else []
 
-        if not analysis["requires_spotify"]:
-            logger.info("No Spotify intent detected — returning guidance message")
-            return AskResponse(
-                answer="I'm here to help you with your Spotify requests. Try asking about your top artists, recent tracks, playlists, or ask me to create one for you!",
-                conversation_id=conversation_id
-            )
+        async def execute_tool(tool_name: str, parameters: dict) -> dict:
+            logger.info("Executing Spotify tool | tool=%s | parameters=%s", tool_name, parameters)
+            return await execute_spotify_tool(tool_name, parameters, body.spotify_access_token)
 
+        system_message = body.system
         if not body.spotify_access_token:
-            logger.warning("Spotify intent detected but no access token provided")
-            return AskResponse(
-                answer="I can help you with Spotify-related questions, but I need your Spotify access token. Please authenticate with Spotify first by visiting the /login endpoint.",
-                conversation_id=conversation_id
+            system_message += (
+                "\n\nNo Spotify access token is available right now, so you cannot call any Spotify tools. "
+                "If the user's request needs live Spotify data, tell them to authenticate by visiting /login."
             )
-
-        if not analysis["tool"]:
-            logger.warning("Spotify intent detected but no tool could be resolved | prompt=%r", body.prompt)
-            return AskResponse(
-                answer="I detected you're asking about music, but I couldn't determine the specific Spotify action you want. Try asking about your top artists, top tracks, recently played songs, current playback, or playlists.",
-                conversation_id=conversation_id
-            )
-
-        logger.info("Executing Spotify tool | tool=%s | parameters=%s", analysis["tool"], analysis["parameters"])
-        spotify_result = await execute_spotify_tool(
-            analysis["tool"],
-            analysis["parameters"],
-            body.spotify_access_token
+        system_message += (
+            "\n\nYour response will be rendered directly in an HTML page — "
+            "return valid HTML only, no markdown code fences."
         )
 
-        if "error" in spotify_result:
-            logger.error("Spotify tool error | tool=%s | error=%s", analysis["tool"], spotify_result["error"])
-            return AskResponse(answer=f"Spotify error: {spotify_result['error']}", conversation_id=conversation_id)
-
-        logger.info("Spotify tool succeeded | tool=%s | generating response", analysis["tool"])
-        answer = openai_client.generate_spotify_enhanced_response(
-            user_prompt=body.prompt,
-            system_message=body.system,
-            spotify_data=spotify_result,
-            tool_info=analysis,
+        result = await openai_client.run_agentic_loop(
+            prompt=body.prompt,
+            available_tools=available_tools,
+            execute_tool=execute_tool,
+            system_message=system_message,
             model=body.model,
             temperature=body.temperature,
             history=history,
         )
-        answer = answer.strip()
-        logger.info("Response generated successfully | tool=%s", analysis["tool"])
+        answer = result["answer"]
+        logger.info("Response generated successfully | tool_calls=%d",
+                    len(result["tool_calls"]))
 
         # ── Persist messages ──────────────────────────────────────
         if conversation_id and user_id:
