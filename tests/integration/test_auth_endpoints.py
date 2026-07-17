@@ -7,16 +7,16 @@ from unittest.mock import patch, MagicMock
 def tc(in_memory_db):
     with (
         patch("app.controller.app.OpenAIClient"),
-        patch("app.controller.app.SpotifyClient") as MockSpotify,
+        patch("app.controller.app.spotify_tools") as mock_spotify,
         patch("app.database.init_db"),
     ):
-        MockSpotify.return_value.get_auth_url.return_value = "https://accounts.spotify.com/authorize?test=1"
-        MockSpotify.return_value.get_access_token_from_code.return_value = {
+        mock_spotify.get_auth_url.return_value = "https://accounts.spotify.com/authorize?test=1"
+        mock_spotify.get_access_token_from_code.return_value = {
             "access_token": "fake_access_token",
             "expires_in": 3600,
             "refresh_token": "fake_refresh",
         }
-        MockSpotify.return_value.get_available_tools.return_value = []
+        mock_spotify.get_available_tools.return_value = []
 
         from fastapi.testclient import TestClient
         from app.controller.app import app
